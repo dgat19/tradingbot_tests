@@ -1,0 +1,67 @@
+import alpaca_trade_api as tradeapi
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+
+# Replace these with your Alpaca API key and secret
+api_key = os.getenv('PA3NRFGUO5AU')
+api_secret = os.getenv('PKLLPAIZVPAFBTCF72XM')
+base_url = 'https://paper-api.alpaca.markets/v2'  # Use paper trading URL
+
+api = tradeapi.REST(api_key, api_secret, base_url, api_version='v2')
+
+def get_stock_data(symbol, start_date, end_date):
+    barset = api.get_bars(symbol, 'minute', start=start_date, end=end_date)
+    return barset[symbol].df
+
+def get_option_chain(symbol, expiration_date):
+    # Fetch option chain (this part is simplified; in a real scenario, you need to integrate with an options data provider)
+    options = api.get_position(symbol, expiration_date)
+    return options
+
+def place_order(symbol, qty, side, order_type, time_in_force, limit_price=None):
+    api.submit_order(
+        symbol=symbol,
+        qty=qty,
+        side=side,
+        type=order_type,
+        time_in_force=time_in_force,
+        limit_price=limit_price
+    )
+
+def momentum_strategy(stock_symbol):
+    end_date = datetime.now().isoformat()
+    start_date = (datetime.now() - timedelta(days=1)).isoformat()
+    
+    data = get_stock_data(stock_symbol, start_date, end_date)
+    data['momentum'] = data['close'] - data['close'].shift(1)
+    latest_momentum = data['momentum'].iloc[-1]
+    
+    if latest_momentum > 0:
+        print(f"Momentum detected in {stock_symbol}. Placing buy order.")
+        place_order(stock_symbol, 1, 'buy', 'market', 'gtc')
+    else:
+        print(f"No positive momentum in {stock_symbol}.")
+
+def breakout_strategy(stock_symbol):
+    end_date = datetime.now().isoformat()
+    start_date = (datetime.now() - timedelta(days=10)).isoformat()
+    
+    data = get_stock_data(stock_symbol, start_date, end_date)
+    max_high = data['high'].max()
+    latest_close = data['close'].iloc[-1]
+    
+    if latest_close > max_high:
+        print(f"Breakout detected in {stock_symbol}. Placing buy order.")
+        place_order(stock_symbol, 1, 'buy', 'market', 'gtc')
+    else:
+        print(f"No breakout in {stock_symbol}.")
+
+# Define stock symbols to monitor
+stock_symbols = ['AAPL', 'TSLA', 'MSFT']
+
+# Run strategies
+for symbol in stock_symbols:
+    print(f"Running strategies for {symbol}...")
+    momentum_strategy(symbol)
+    breakout_strategy(symbol)

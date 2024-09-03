@@ -1,0 +1,94 @@
+import finnhub
+import requests
+import pandas as pd
+import json
+import websocket
+import matplotlib.pyplot as plt
+import datetime
+
+# Replace these with your actual credentials
+finnhub_client = finnhub.Client(api_key="cputcn9r01qhmaurkbd0cputcn9r01qhmaurkbdg")
+base_url = 'https://finnhub.io/api/v1'
+
+# Stock quote
+res = finnhub_client.quote('AAPL')
+print(res)
+
+# Function to get market data
+def get_market_data(symbol):
+    url = f'{base_url}/quote?symbol={symbol}&token={finnhub_client}'
+    response = requests.get(url)
+    data = response.json()
+    return data
+
+# Function to analyze market data
+def analyze_market_data(data):
+    # This is where you would implement your stock analysis and options trading algorithms
+    # For simplicity, let's assume we have a simple algorithm that decides to buy if the current price is lower than the open price
+    return data['c'] < data['o']
+
+# Function to place a trade
+def place_trade(symbol, quantity):
+    # This is where you would implement the code to place a trade
+    # The implementation will depend on your broker
+    # For simplicity, let's just print a message
+    print(f'Placing trade: BUY {quantity} {symbol}')
+
+# Create a figure and axis for the plot
+fig, ax = plt.subplots()
+
+# Create a second y-axis for the volume
+ax2 = ax.twinx()
+
+# Initialize two lists to store the price and volume data
+price_data = []
+volume_data = []
+
+def on_message(ws, message):
+    # Parse the message as JSON
+    msg = json.loads(message)
+
+    # Check if 'data' field exists in the message
+    if 'data' in msg:
+        # Append the price and volume data to the lists
+        price_data.append((datetime.datetime.now(), msg['data'][0]['p']))
+        volume_data.append((datetime.datetime.now(), msg['data'][0]['v']))
+
+        # Update the price plot
+        ax.clear()
+        ax.plot([x[0] for x in price_data], [x[1] for x in price_data], color='blue')
+
+        # Calculate the moving average
+        if len(price_data) > 10:  # Change this to your desired window size
+            df = pd.DataFrame(price_data, columns=['time', 'price'])
+            df.set_index('time', inplace=True)
+            moving_avg = df['price'].rolling(window=10).mean()  # Change this to your desired window size
+
+            # Plot the moving average
+            ax.plot(moving_avg.index, moving_avg.values, color='green')
+
+        # Update the volume plot
+        ax2.clear()
+        ax2.plot([x[0] for x in volume_data], [x[1] for x in volume_data], color='red')
+
+        # Redraw the plot
+        plt.draw()
+        plt.pause(0.00001)
+
+def on_error(ws, error):
+    print(error)
+
+def on_close(ws):
+    print("### closed ###")
+
+def on_open(ws):
+    ws.send('{"type":"subscribe","symbol":"AAPL"}')
+
+if __name__ == "__main__":
+    websocket.enableTrace(True)
+    ws = websocket.WebSocketApp("wss://ws.finnhub.io?token=cputcn9r01qhmaurkbd0cputcn9r01qhmaurkbdg",
+                              on_message = on_message,
+                              on_error = on_error,
+                              on_close = on_close)
+    ws.on_open = on_open
+    ws.run_forever()

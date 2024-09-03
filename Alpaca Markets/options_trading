@@ -1,0 +1,20 @@
+api_key = 'PA3NRFGUO5AU'
+api_secret = 'PKLLPAIZVPAFBTCF72XM'
+paper = True
+
+from datetime import datetime, timedelta
+import alpaca
+from alpaca.data.historical.option import OptionHistoricalDataClient, OptionLatestQuoteRequest
+from alpaca.data.historical.stock import StockHistoricalDataClient, StockLatestTradeRequest
+from alpaca.trading.client import TradingClient, GetAssetsRequest
+from alpaca.trading.requests import GetOptionContractsRequest, LimitOrderRequest, MarketOrderRequest, GetOrdersRequest
+from alpaca.trading.enums import AssetStatus, ContractType, OrderSide, OrderType, TimeInForce, QueryOrderStatus
+
+trade_client = TradingClient(api_key=api_key, secret_key=api_secret, paper=paper)
+stock_data_client = StockHistoricalDataClient(api_key=api_key, secret_key=api_secret)
+option_data_client = OptionHistoricalDataClient(api_key=api_key, secret_key=api_secret)
+
+acct = trade_client.get_account()
+print(f"Options Approved Level: {acct.options_approved_level}")
+print(f"Options Trading Level: {acct.options_trading_level}")
+print(f"Options Buying Power: {acct.options_buying_power}")

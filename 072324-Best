@@ -1,0 +1,194 @@
+import pandas as pd 
+import matplotlib.pyplot as plt 
+import requests
+import math
+from termcolor import colored as cl 
+import numpy as np
+from datetime import datetime
+import time
+
+plt.style.use('fivethirtyeight')
+plt.rcParams['figure.figsize'] = (15, 8)
+
+def get_historic_data(symbol, start_date):
+    # Convert the start date to UNIX timestamp
+    start_timestamp = int(time.mktime(datetime.strptime(start_date, "%Y-%m-%d").timetuple()))
+    
+    # Get the current date in UNIX timestamp
+    end_timestamp = int(time.time())
+    
+    ticker = symbol
+    api_url = f'https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={start_timestamp}&period2={end_timestamp}&interval=1d&events=history&includeAdjustedClose=true'
+    df = pd.read_csv(api_url)
+    
+    date = []
+    open = []
+    high = []
+    low = []
+    close = []
+    
+    for _, row in df.iterrows():
+        date.append(row['Date'])
+        open.append(row['Open'])
+        high.append(row['High'])
+        low.append(row['Low'])
+        close.append(row['Close'])
+    
+    date_df = pd.DataFrame(date).rename(columns = {0:'date'})
+    open_df = pd.DataFrame(open).rename(columns = {0:'open'})
+    high_df = pd.DataFrame(high).rename(columns = {0:'high'})
+    low_df = pd.DataFrame(low).rename(columns = {0:'low'})
+    close_df = pd.DataFrame(close).rename(columns = {0:'close'})
+    frames = [date_df, open_df, high_df, low_df, close_df]
+    df = pd.concat(frames, axis = 1, join = 'inner')
+    return df
+
+def calculate_ema(data, window):
+    return data.ewm(span=window, adjust=False).mean()
+
+def calculate_macd(data, short_window, long_window):
+    short_ema = calculate_ema(data, short_window)
+    long_ema = calculate_ema(data, long_window)
+    macd_line = short_ema - long_ema
+    signal_line = calculate_ema(macd_line, 9)
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+def sma(data, n):
+    sma = data.rolling(window = n).mean()
+    return pd.DataFrame(sma)
+
+def implement_sma_strategy(data, short_window, long_window):
+    sma1 = short_window
+    sma2 = long_window
+    buy_price = []
+    sell_price = []
+    sma_signal = []
+    signal = 0
+    
+    for i in range(len(data)):
+        if sma2.iloc[i] > sma1.iloc[i]:
+            if signal != 1:
+                buy_price.append(data.iloc[i])
+                sell_price.append(np.nan)
+                signal = 1
+                sma_signal.append(signal)
+            else:
+                buy_price.append(np.nan)
+                sell_price.append(np.nan)
+                sma_signal.append(0)
+        elif sma1.iloc[i] > sma2.iloc[i]:
+            if signal != -1:
+                buy_price.append(np.nan)
+                sell_price.append(data.iloc[i])
+                signal = -1
+                sma_signal.append(-1)
+            else:
+                buy_price.append(np.nan)
+                sell_price.append(np.nan)
+                sma_signal.append(0)
+        else:
+            buy_price.append(np.nan)
+            sell_price.append(np.nan)
+            sma_signal.append(0)
+            
+    return buy_price, sell_price, sma_signal
+
+ticker_input = input('Enter ticker: ')
+start_date_input = input('Enter start date (YYYY-MM-DD): ')
+ticker_data = get_historic_data(ticker_input, start_date_input)
+ticker_data = ticker_data.set_index('date')
+ticker_data.index = pd.to_datetime(ticker_data.index)
+
+ticker_data.to_csv('ticker.csv')
+ticker_data = pd.read_csv('ticker.csv').set_index('date')
+ticker_data.index = pd.to_datetime(ticker_data.index)
+ticker_data.tail()
+
+n = [20, 50]
+for i in n:
+    ticker_data[f'sma_{i}'] = sma(ticker_data['close'], i)
+    
+ticker_data.tail()
+
+macd_line, signal_line, histogram = calculate_macd(ticker_data['close'], 12, 26)
+ticker_data['macd_line'] = macd_line
+ticker_data['signal_line'] = signal_line
+ticker_data['macd_histogram'] = histogram
+
+plt.plot(ticker_data['close'], label = ticker_input, linewidth = 5, alpha = 0.3)
+plt.plot(ticker_data['sma_20'], label = 'SMA 20')
+plt.plot(ticker_data['sma_50'], label = 'SMA 50')
+plt.plot(ticker_data['macd_line'], label='MACD Line')
+plt.plot(ticker_data['signal_line'], label='Signal Line')
+plt.title(ticker_input + ' Simple Moving Averages (20, 50) and MACD')
+plt.legend(loc = 'upper left')
+plt.show()
+
+sma_20 = ticker_data['sma_20']
+sma_50 = ticker_data['sma_50']
+
+buy_price, sell_price, signal = implement_sma_strategy(ticker_data['close'], sma_20, sma_50)
+
+plt.plot(ticker_data['close'], alpha = 0.3, label = ticker_input)
+plt.plot(sma_20, alpha = 0.6, label = 'SMA 20')
+plt.plot(sma_50, alpha = 0.6, label = 'SMA 50')
+plt.scatter(ticker_data.index, buy_price, marker = '^', s = 200, color = 'darkblue', label = 'BUY SIGNAL')
+plt.scatter(ticker_data.index, sell_price, marker = 'v', s = 200, color = 'crimson', label = 'SELL SIGNAL')
+plt.legend(loc = 'upper left')
+plt.title(ticker_input + ' SMA CROSSOVER TRADING SIGNALS')
+plt.show()
+
+position = []
+for i in range(len(signal)):
+    if signal[i] > 1:
+        position.append(0)
+    else:
+        position.append(1)
+        
+for i in range(len(ticker_data['close'])):
+    if signal[i] == 1:
+        position[i] = 1
+    elif signal[i] == -1:
+        position[i] = 0
+    else:
+        position[i] = position[i-1]
+
+sma_20 = pd.DataFrame(sma_20).rename(columns = {0:'sma_20'})
+sma_50 = pd.DataFrame(sma_50).rename(columns = {0:'sma_50'})
+signal = pd.DataFrame(signal).rename(columns = {0:'sma_signal'}).set_index(ticker_data.index)
+position = pd.DataFrame(position).rename(columns = {0:'sma_position'}).set_index(ticker_data.index)
+
+frames = [sma_20, sma_50, signal, position]
+strategy = pd.concat(frames, join = 'inner', axis = 1)
+strategy = strategy.reset_index().drop('date', axis = 1)
+
+ticker_ret = pd.DataFrame(np.diff(ticker_data['close'])).rename(columns = {0:'returns'})
+sma_strategy_ret = []
+
+for i in range(len(ticker_ret)):
+    try:
+        returns = ticker_ret['returns'][i]*strategy['sma_position'].iloc[i]
+        sma_strategy_ret.append(returns)
+    except:
+        pass
+    
+sma_strategy_ret_df = pd.DataFrame(sma_strategy_ret).rename(columns = {0:'sma_returns'})
+
+investment_value = input('How much is put in? ')
+number_of_stocks = math.floor(float(investment_value)/ticker_data['close'].iloc[1])
+sma_investment_ret = []
+
+for i in range(len(sma_strategy_ret_df['sma_returns'])):
+    returns = number_of_stocks*sma_strategy_ret_df['sma_returns'].iloc[i]
+    sma_investment_ret.append(returns)
+
+sma_investment_ret_df = pd.DataFrame(sma_investment_ret).rename(columns = {0:'investment_returns'})
+total_investment_ret = round(sum(sma_investment_ret_df['investment_returns']), 2)
+
+# Calculate the date duration
+start_date = datetime.strptime(start_date_input, "%Y-%m-%d")
+end_date = datetime.now()
+date_duration = end_date - start_date
+
+print(cl('Profit gained from the strategy by investing $' + investment_value + ' in ' + ticker_input + ': $' + str(total_investment_ret) + ' in ' + str(date_duration.days) + ' days', attrs = ['bold']))
