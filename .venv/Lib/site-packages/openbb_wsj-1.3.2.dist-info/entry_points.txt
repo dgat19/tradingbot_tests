@@ -1,0 +1,3 @@
+[openbb_provider_extension]
+wsj=openbb_wsj:wsj_provider
+

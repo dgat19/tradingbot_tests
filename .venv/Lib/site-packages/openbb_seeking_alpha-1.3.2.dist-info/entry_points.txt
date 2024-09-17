@@ -1,0 +1,3 @@
+[openbb_provider_extension]
+seeking_alpha=openbb_seeking_alpha:seeking_alpha_provider
+

@@ -1,0 +1,42 @@
+Metadata-Version: 2.1
+Name: openbb-tradier
+Version: 1.2.2
+Summary: Tradier Provider Extension for the OpenBB Platform
+License: AGPL-3.0-only
+Author: OpenBB
+Author-email: hello@openbb.co
+Requires-Python: >=3.9,<4.0
+Classifier: License :: OSI Approved :: GNU Affero General Public License v3
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Requires-Dist: openbb-core (>=1.3.2,<2.0.0)
+Description-Content-Type: text/markdown
+
+# OpenBB Tradier Provider
+
+This extension integrates the [Tradier](https://tradier.com) data provider into the OpenBB Platform.
+
+## Installation
+
+To install the extension:
+
+```bash
+pip install openbb-tradier
+```
+
+Documentation available [here](https://docs.openbb.co/platform/developer_guide/contributing).
+
+## Authorization
+
+This extension requires two authorization fields:
+
+- 'tradier_api_key'
+- 'tradier_account_type'
+
+Where the account type is either "sandbox" or "live".
+
+Add these to the file, under 'credentials': `~/.openbb_platform/user_settings.json`
+

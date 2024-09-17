@@ -1,0 +1,3 @@
+[openbb_provider_extension]
+ecb=openbb_ecb:ecb_provider
+

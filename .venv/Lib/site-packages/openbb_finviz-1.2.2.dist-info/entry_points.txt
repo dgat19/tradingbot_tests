@@ -1,0 +1,3 @@
+[openbb_provider_extension]
+finviz=openbb_finviz:finviz_provider
+

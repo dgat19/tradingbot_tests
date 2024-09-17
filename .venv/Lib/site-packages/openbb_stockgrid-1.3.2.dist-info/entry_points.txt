@@ -1,0 +1,3 @@
+[openbb_provider_extension]
+stockgrid=openbb_stockgrid:stockgrid_provider
+

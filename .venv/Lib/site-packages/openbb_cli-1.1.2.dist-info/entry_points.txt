@@ -1,0 +1,3 @@
+[console_scripts]
+openbb=openbb_cli.cli:main
+

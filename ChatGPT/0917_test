@@ -3,8 +3,11 @@ import yfinance as yf
 import talib
 import pandas as pd
 import numpy as np
-from alpaca_trade_api.rest import REST, TimeFrame
+from alpaca_trade_api.rest import REST
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, cross_val_score
+import newspaper
+import re
 import csv
 import datetime
 import json
@@ -23,7 +26,33 @@ trade_log = []
 trade_data = []
 model = RandomForestClassifier()
 
-# Function to analyze stock with OpenBB Terminal
+# Function to scrape news for stock symbols
+def scrape_news_articles(url):
+    news_paper = newspaper.build(url, language='en')
+    articles = news_paper.articles
+    stock_tickers = set()
+
+    # Fetch stock ticker list from yfinance or other reliable source
+    all_stock_tickers = yf.Tickers('AAPL TSLA GOOGL AMZN FB').tickers.keys()  # Example tickers; you can fetch a larger list
+
+    # Scrape articles
+    for article in articles[:10]:  # Limit to first 10 articles for efficiency
+        try:
+            article.download()
+            article.parse()
+            text = article.text
+
+            # Use regex to find stock tickers within the article
+            for ticker in all_stock_tickers:
+                if re.search(rf'\b{ticker}\b', text):
+                    stock_tickers.add(ticker)
+
+        except Exception as e:
+            print(f"Error processing article: {e}")
+
+    return stock_tickers
+
+# Fetch stock data and apply technical indicators using OpenBB Terminal
 def analyze_stock_with_openbb(ticker):
     stock_data = openbb.stocks.load(ticker, interval="1d", start="6mo")
 
@@ -43,25 +72,16 @@ def analyze_stock_with_openbb(ticker):
 
     return macd_crossover, rsi_overbought, rsi_oversold
 
-# Function to backtest trading strategy using OpenBB
-def backtest_strategy(ticker, start_date="2020-01-01", end_date="2023-01-01"):
-    # OpenBB backtest module
-    backtest_result = openbb.stocks.ta.backtest(ticker, start=start_date, end=end_date, indicators=['macd', 'rsi'])
-    print(backtest_result)
-    return backtest_result
-
 # Machine learning model optimization
 def optimize_model():
-    # Hyperparameter grid search for RandomForestClassifier
     param_grid = {
         'n_estimators': [50, 100, 200],
         'max_depth': [5, 10, 20],
         'min_samples_split': [2, 5, 10]
     }
-    
+
     grid_search = GridSearchCV(estimator=model, param_grid=param_grid, cv=5)
     grid_search.fit(X_train, y_train)
-    
     print(f"Best parameters: {grid_search.best_params_}")
     return grid_search.best_estimator_
 
@@ -74,40 +94,74 @@ def cross_validate_model():
 # Evaluate and retrain model based on trades
 def retrain_model():
     if len(trade_data) < 10:
-        return  # Need more data for retraining
+        return
 
     df = pd.DataFrame(trade_data)
-    X = df[['entry_price', 'exit_price', 'volume', 'macd', 'rsi']]  # Example features
-    y = df['result'].apply(lambda x: 1 if x == 'win' else 0)  # 1 = win, 0 = loss
+    X = df[['entry_price', 'exit_price', 'volume', 'macd', 'rsi']]
+    y = df['result'].apply(lambda x: 1 if x == 'win' else 0)
 
     global X_train, y_train
     X_train, y_train = X, y
 
-    # Perform cross-validation and hyperparameter tuning
     cross_validate_model()
     optimized_model = optimize_model()
 
-    # Update the model with the best estimator
     model = optimized_model
+
+# Execute trades and log results
+def trade_stock(ticker, buy_call=True):
+    action = 'call' if buy_call else 'put'
+    try:
+        alpaca.submit_order(
+            symbol=ticker,
+            qty=1,
+            side='buy',
+            type='market',
+            time_in_force='gtc',
+            order_class='option',
+            option_side=action
+        )
+        log_trade(ticker, action)
+    except Exception as e:
+        print(f"Error executing trade for {ticker}: {e}")
+
+# Logging the trades made
+def log_trade(ticker, action):
+    trade_time = datetime.datetime.now()
+    log_entry = {
+        'ticker': ticker,
+        'action': action,
+        'time': trade_time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    trade_log.append(log_entry)
+
+    with open('trade_log.csv', 'a', newline='') as file:
+        writer = csv.DictWriter(file, fieldnames=['ticker', 'action', 'time'])
+        writer.writerow(log_entry)
 
 # Main function
 def main():
-    stocks = ['AAPL', 'TSLA', 'GOOGL']  # Example tickers
-    for stock in stocks:
-        try:
-            # Backtest the strategy
-            backtest_strategy(stock)
+    # Example news source to scrape for stock tickers
+    news_url = "https://www.marketwatch.com/latest-news"
+    
+    # Scrape news articles for potential volatile stocks
+    stock_tickers = scrape_news_articles(news_url)
+    
+    if not stock_tickers:
+        print("No stock tickers found in news articles.")
+        return
 
+    for stock in stock_tickers:
+        try:
             # Analyze stock using OpenBB
             macd_crossover, rsi_overbought, rsi_oversold = analyze_stock_with_openbb(stock)
 
-            # Train ML model on historical data (trade data required)
-            retrain_model()
-
-            # Example: Execute a trade based on the analysis
+            # Predict buy_call based on technical analysis
             buy_call = macd_crossover and rsi_oversold
-            trade_stock(stock, buy_call)
             
+            # Example: Execute a trade based on the analysis
+            trade_stock(stock, buy_call)
+
         except Exception as e:
             print(f"Error analyzing {stock}: {e}")
 

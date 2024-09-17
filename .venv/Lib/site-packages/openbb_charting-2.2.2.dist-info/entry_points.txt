@@ -1,0 +1,3 @@
+[openbb_obbject_extension]
+openbb_charting=openbb_charting:ext
+

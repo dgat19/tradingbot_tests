@@ -1,0 +1,3 @@
+[openbb_core_extension]
+quantitative=openbb_quantitative.quantitative_router:router
+
