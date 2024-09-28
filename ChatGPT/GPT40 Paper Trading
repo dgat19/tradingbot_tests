@@ -1,11 +1,11 @@
 import yfinance as yf
 import numpy as np
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from alpha_vantage.timeseries import TimeSeries
-from alpaca_trade_api.rest import REST
-from alpaca.trading.client import TradingClient 
+from alpaca_trade_api.rest import REST, TimeFrame
+from alpaca_trade_api.entity import Order
+from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderType, OrderStatus
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderType, OrderClass, OrderStatus
 import time
 import requests
 from bs4 import BeautifulSoup
@@ -17,24 +17,13 @@ ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
 api = REST(ALPACA_API_KEY, ALPACA_API_SECRET, base_url=ALPACA_BASE_URL)
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
-# Check if Alpaca API is connected properly (before placing orders)
-#try:
-    #account = api.get_account()
-    #print(f"Account status: {account.status}")
-    #print(f"Account balance: {account.cash}")
-#except Exception as e:
-    #print(f"Error connecting to Alpaca API: {e}")
-
+# Verify Alpaca connection
 try:
     account = trading_client.get_account()
     print(f"Account status: {account.status}")
-    print(f"Account balance: {account.cash}", sep=",")
+    print(f"Account balance: {account.cash}")
 except Exception as e:
     print(f"Error connecting to Alpaca API: {e}")
-
-# Set up Alpha Vantage API key (Replace with your own)
-ALPHA_VANTAGE_API_KEY = "SBQMUEOPCU9E4YYW"
-ts = TimeSeries(key=ALPHA_VANTAGE_API_KEY, output_format='pandas')
 
 # 1. Scrape News Articles
 def scrape_news(stock_symbol):
@@ -58,9 +47,6 @@ def analyze_sentiment(headlines):
 
 # 3. Get Stock Volatility from Yahoo Finance
 def get_stock_volatility_yahoo(symbol):
-    """
-    Retrieves stock data using Yahoo Finance and calculates basic volatility.
-    """
     stock_data = yf.download(symbol, period='1mo', interval='1d')
     close_prices = stock_data['Close'].values
     
@@ -68,46 +54,50 @@ def get_stock_volatility_yahoo(symbol):
     volatility = np.std(close_prices)
     return volatility
 
-# 4. Get Stock Volatility from Alpha Vantage
-def get_stock_volatility_alpha_vantage(symbol):
-    """
-    Retrieves stock data using Alpha Vantage and calculates basic volatility.
-    """
+# 4. Get Options Chain
+def get_options_chain(symbol):
     try:
-        stock_data, meta_data = ts.get_daily(symbol=symbol, outputsize='compact')
-        close_prices = stock_data['4. close'].values[-30:]
-        volatility = np.std(close_prices)
-        return volatility
+        stock = yf.Ticker(symbol)
+        options_dates = stock.options  # Get available expiration dates
+        latest_date = options_dates[-1]  # Choose the latest expiration date
+        
+        options_chain = stock.option_chain(latest_date)
+        return options_chain
     except Exception as e:
-        print(f"Error fetching data from Alpha Vantage for {symbol}: {e}")
+        print(f"Error fetching options chain for {symbol}: {e}")
         return None
 
 # 5. Place Option Trade
-def place_option_trade(symbol, option_type, qty):
+def place_option_trade(symbol, contract_symbol, qty, option_type='call'):
     try:
-        trading_client.submit_order(
-            symbol=symbol,
+        side = OrderSide.BUY if option_type == 'call' else OrderSide.SELL
+        
+        market_order_data = MarketOrderRequest(
+            symbol=contract_symbol,  # This is the options contract symbol
             qty=qty,
-            side=OrderSide.BUY,
+            side=side,
             type=OrderType.MARKET,
-            time_in_force=TimeInForce.GTC
+            time_in_force=TimeInForce.GTC,
+            order_class=OrderClass.SIMPLE
         )
-        print(f"Placed a {option_type.upper()} trade for {symbol}")
+        
+        # Submit the order and capture the response
+        order = trading_client.submit_order(order_data=market_order_data)
+        
+        # Check the order status
+        if order.status == OrderStatus.FILLED:
+            print(f"Option order for {contract_symbol} ({side}) has been filled.")
+        else:
+            print(f"Option order for {contract_symbol} ({side}) is {order.status}.")
     except Exception as e:
-        print(f"Error trading {symbol}: {e}")
+        print(f"Error placing options trade for {symbol}: {e}")
 
 # 6. Fetch live data for stock symbols
 def fetch_live_data(symbol):
-    """
-    Fetches live market data for the given stock symbol from Yahoo Finance.
-    
-    Args:
-        symbol: The stock symbol to fetch data for.
-    """
     try:
         stock = yf.Ticker(symbol)
         data = stock.history(period="1d", interval="1m")
-        latest_data = data.iloc[1]
+        latest_data = data.iloc[-1]  # Get the latest minute data
         print(f"Live data for {symbol} - Close: {latest_data['Close']}, High: {latest_data['High']}, Low: {latest_data['Low']}, Open: {latest_data['Open']}, Volume: {latest_data['Volume']}")
         return latest_data
     except Exception as e:
@@ -122,71 +112,45 @@ def automated_trading(stock_symbol, qty=1):
     
     # Step 2: Get stock data and calculate volatility
     current_volatility_yahoo = get_stock_volatility_yahoo(stock_symbol)
-    #current_volatility_alpha = get_stock_volatility_alpha_vantage(stock_symbol)
-    
-    # Use the most reliable volatility source available
-    current_volatility = current_volatility_yahoo #or current_volatility_alpha
+    current_volatility = current_volatility_yahoo  # Use Yahoo volatility for simplicity
 
     live_data = fetch_live_data(stock_symbol)
 
-    # Step 3: Decision logic based on sentiment and volatility
-    if sentiment_score > 0.04 and current_volatility > 1:  # Adjust volatility threshold
-        place_option_trade(stock_symbol, option_type='call', qty=qty)
+    # Step 3: Get the options chain for the stock
+    options_chain = get_options_chain(stock_symbol)
+    if options_chain is None:
+        return
+
+    # Choose a strike price for the option (for simplicity, choosing the first option)
+    option_contract = options_chain.calls.iloc[0] if sentiment_score > 0.05 else options_chain.puts.iloc[0]
+    contract_symbol = option_contract['contractSymbol']
+
+    # Step 4: Decision logic based on sentiment and volatility
+    if sentiment_score > 0.04 and current_volatility > 1:
+        place_option_trade(stock_symbol, contract_symbol, qty=qty, option_type='call')
     elif sentiment_score < -0.04 and current_volatility > 1:
-        place_option_trade(stock_symbol, option_type='put', qty=qty)
+        place_option_trade(stock_symbol, contract_symbol, qty=qty, option_type='put')
     else:
         print(f"No significant action for {stock_symbol} - sentiment: {sentiment_score}, volatility: {current_volatility}, live data: {live_data}")
-    track_returns(stock_symbol)
 
-# 8. Track >10% Daily Returns (Mock calculation)
-def track_returns(symbol):
-    """
-    Checks portfolio returns and evaluates if they've exceeded 10% daily returns.
-    """
-    try:  # Corrected this line
-        positions = api.list_positions()
-        for position in positions:
-            if position.symbol == symbol:
-                current_return = float(position.unrealized_plpc) * 100  # Convert to percentage
-                if current_return > 10:
-                    print(f"Achieved over 10% return on {symbol} today! Return: {current_return}%")
-                else:
-                    print(f"Return for {symbol} is {current_return}%")
-    except Exception as e:
-        print(f"Error tracking returns for {symbol}: {e}")
-
-# 9. Continuous Trading with Paper Trading and Return Tracking
-def continuous_trading(stock_list, qty=1, interval=300, stop_loss_pct=0.25, take_profit_pct=0.75):
-    """
-    Continuously monitor and trade multiple stocks with risk management and return tracking.
-    
-    Args:
-        stock_list: List of stock symbols to monitor.
-        qty: Quantity of contracts to trade.
-        interval: Time between each cycle in seconds (default: 1 hour).
-        stop_loss_pct: Percentage for stop loss.
-        take_profit_pct: Percentage for take profit.
-    """
+# 8. Continuous Trading
+def continuous_trading(stock_list, qty=1, interval=300):
     while True:
         for stock_symbol in stock_list:
             try:
                 # Check for trading opportunities
                 automated_trading(stock_symbol, qty)
-                
-                # Track returns
-                track_returns(stock_symbol)  # Pass the symbol to the function
             except Exception as e:
                 print(f"Error trading {stock_symbol}: {e}")
         
-        # Wait for the next cycle (interval: 1 hour by default)
+        # Wait for the next cycle
         print(f"Waiting for the next cycle... ({interval / 60} minutes)\n")
         time.sleep(interval)
 
-# 10. Execute the Trading Strategy
+# 9. Execute the Trading Strategy
 if __name__ == "__main__":
     # List of stock symbols to monitor
-    stock_list = ["AAPL", "TSLA", "AMZN", "GOOGL", "MSFT", "NVDA", "INTC", "LUNR", "ASTS"]
+    stock_list = ["AAPL", "TSLA", "AMZN", "GOOGL", "MSFT"]
 
-    # Start monitoring and trading stocks
-    continuous_trading(stock_list, qty=1, interval=300, stop_loss_pct=0.25, take_profit_pct=0.75)
-
+    # Start monitoring and trading options
+    continuous_trading(stock_list, qty=1, interval=300)
