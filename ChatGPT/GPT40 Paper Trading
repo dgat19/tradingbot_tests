@@ -1,67 +1,192 @@
-import alpaca_trade_api as tradeapi
-import pandas as pd
-from datetime import datetime, timedelta
-import os
+import yfinance as yf
+import numpy as np
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+from alpha_vantage.timeseries import TimeSeries
+from alpaca_trade_api.rest import REST
+from alpaca.trading.client import TradingClient 
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderType, OrderStatus
+import time
+import requests
+from bs4 import BeautifulSoup
 
-# Replace these with your Alpaca API key and secret
-api_key = os.getenv('PA3NRFGUO5AU')
-api_secret = os.getenv('PKLLPAIZVPAFBTCF72XM')
-base_url = 'https://paper-api.alpaca.markets/v2'  # Use paper trading URL
+# Set up your Alpaca API keys (Replace with your own)
+ALPACA_API_KEY = "PK9RIB7H3DVU9FMHROR7"
+ALPACA_API_SECRET = "dvwSlk4p1ZKBqPsLGJbehu1dAcd82MSwLJ5BgHVh"
+ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
+api = REST(ALPACA_API_KEY, ALPACA_API_SECRET, base_url=ALPACA_BASE_URL)
+trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
-api = tradeapi.REST(api_key, api_secret, base_url, api_version='v2')
+# Check if Alpaca API is connected properly (before placing orders)
+#try:
+    #account = api.get_account()
+    #print(f"Account status: {account.status}")
+    #print(f"Account balance: {account.cash}")
+#except Exception as e:
+    #print(f"Error connecting to Alpaca API: {e}")
 
-def get_stock_data(symbol, start_date, end_date):
-    barset = api.get_bars(symbol, 'minute', start=start_date, end=end_date)
-    return barset[symbol].df
+try:
+    account = trading_client.get_account()
+    print(f"Account status: {account.status}")
+    print(f"Account balance: {account.cash}", sep=",")
+except Exception as e:
+    print(f"Error connecting to Alpaca API: {e}")
 
-def get_option_chain(symbol, expiration_date):
-    # Fetch option chain (this part is simplified; in a real scenario, you need to integrate with an options data provider)
-    options = api.get_position(symbol, expiration_date)
-    return options
+# Set up Alpha Vantage API key (Replace with your own)
+ALPHA_VANTAGE_API_KEY = "SBQMUEOPCU9E4YYW"
+ts = TimeSeries(key=ALPHA_VANTAGE_API_KEY, output_format='pandas')
 
-def place_order(symbol, qty, side, order_type, time_in_force, limit_price=None):
-    api.submit_order(
-        symbol=symbol,
-        qty=qty,
-        side=side,
-        type=order_type,
-        time_in_force=time_in_force,
-        limit_price=limit_price
-    )
-
-def momentum_strategy(stock_symbol):
-    end_date = datetime.now().isoformat()
-    start_date = (datetime.now() - timedelta(days=1)).isoformat()
+# 1. Scrape News Articles
+def scrape_news(stock_symbol):
+    url = f"https://www.google.com/search?q={stock_symbol}+stock+news"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    response = requests.get(url, headers=headers)
+    soup = BeautifulSoup(response.content, 'html.parser')
     
-    data = get_stock_data(stock_symbol, start_date, end_date)
-    data['momentum'] = data['close'] - data['close'].shift(1)
-    latest_momentum = data['momentum'].iloc[-1]
+    # Extract news headlines
+    headlines = [h.get_text() for h in soup.find_all('h3')]
+    return headlines
+
+# 2. Sentiment Analysis on Headlines
+def analyze_sentiment(headlines):
+    analyzer = SentimentIntensityAnalyzer()
+    sentiments = [analyzer.polarity_scores(headline)['compound'] for headline in headlines]
     
-    if latest_momentum > 0:
-        print(f"Momentum detected in {stock_symbol}. Placing buy order.")
-        place_order(stock_symbol, 1, 'buy', 'market', 'gtc')
+    # Average sentiment score (positive if above 0.05, negative if below -0.05)
+    avg_sentiment = np.mean(sentiments)
+    return avg_sentiment
+
+# 3. Get Stock Volatility from Yahoo Finance
+def get_stock_volatility_yahoo(symbol):
+    """
+    Retrieves stock data using Yahoo Finance and calculates basic volatility.
+    """
+    stock_data = yf.download(symbol, period='1mo', interval='1d')
+    close_prices = stock_data['Close'].values
+    
+    # Calculate volatility as the standard deviation of daily closing prices
+    volatility = np.std(close_prices)
+    return volatility
+
+# 4. Get Stock Volatility from Alpha Vantage
+def get_stock_volatility_alpha_vantage(symbol):
+    """
+    Retrieves stock data using Alpha Vantage and calculates basic volatility.
+    """
+    try:
+        stock_data, meta_data = ts.get_daily(symbol=symbol, outputsize='compact')
+        close_prices = stock_data['4. close'].values[-30:]
+        volatility = np.std(close_prices)
+        return volatility
+    except Exception as e:
+        print(f"Error fetching data from Alpha Vantage for {symbol}: {e}")
+        return None
+
+# 5. Place Option Trade
+def place_option_trade(symbol, option_type, qty):
+    try:
+        trading_client.submit_order(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            time_in_force=TimeInForce.GTC
+        )
+        print(f"Placed a {option_type.upper()} trade for {symbol}")
+    except Exception as e:
+        print(f"Error trading {symbol}: {e}")
+
+# 6. Fetch live data for stock symbols
+def fetch_live_data(symbol):
+    """
+    Fetches live market data for the given stock symbol from Yahoo Finance.
+    
+    Args:
+        symbol: The stock symbol to fetch data for.
+    """
+    try:
+        stock = yf.Ticker(symbol)
+        data = stock.history(period="1d", interval="1m")
+        latest_data = data.iloc[1]
+        print(f"Live data for {symbol} - Close: {latest_data['Close']}, High: {latest_data['High']}, Low: {latest_data['Low']}, Open: {latest_data['Open']}, Volume: {latest_data['Volume']}")
+        return latest_data
+    except Exception as e:
+        print(f"Error fetching live data for {symbol}: {e}")
+        return None
+
+# 7. Main Automated Trading Loop
+def automated_trading(stock_symbol, qty=1):
+    # Step 1: Scrape news and perform sentiment analysis
+    headlines = scrape_news(stock_symbol)
+    sentiment_score = analyze_sentiment(headlines)
+    
+    # Step 2: Get stock data and calculate volatility
+    current_volatility_yahoo = get_stock_volatility_yahoo(stock_symbol)
+    #current_volatility_alpha = get_stock_volatility_alpha_vantage(stock_symbol)
+    
+    # Use the most reliable volatility source available
+    current_volatility = current_volatility_yahoo #or current_volatility_alpha
+
+    live_data = fetch_live_data(stock_symbol)
+
+    # Step 3: Decision logic based on sentiment and volatility
+    if sentiment_score > 0.04 and current_volatility > 1:  # Adjust volatility threshold
+        place_option_trade(stock_symbol, option_type='call', qty=qty)
+    elif sentiment_score < -0.04 and current_volatility > 1:
+        place_option_trade(stock_symbol, option_type='put', qty=qty)
     else:
-        print(f"No positive momentum in {stock_symbol}.")
+        print(f"No significant action for {stock_symbol} - sentiment: {sentiment_score}, volatility: {current_volatility}, live data: {live_data}")
+    track_returns(stock_symbol)
 
-def breakout_strategy(stock_symbol):
-    end_date = datetime.now().isoformat()
-    start_date = (datetime.now() - timedelta(days=10)).isoformat()
+# 8. Track >10% Daily Returns (Mock calculation)
+def track_returns(symbol):
+    """
+    Checks portfolio returns and evaluates if they've exceeded 10% daily returns.
+    """
+    try:  # Corrected this line
+        positions = api.list_positions()
+        for position in positions:
+            if position.symbol == symbol:
+                current_return = float(position.unrealized_plpc) * 100  # Convert to percentage
+                if current_return > 10:
+                    print(f"Achieved over 10% return on {symbol} today! Return: {current_return}%")
+                else:
+                    print(f"Return for {symbol} is {current_return}%")
+    except Exception as e:
+        print(f"Error tracking returns for {symbol}: {e}")
+
+# 9. Continuous Trading with Paper Trading and Return Tracking
+def continuous_trading(stock_list, qty=1, interval=300, stop_loss_pct=0.25, take_profit_pct=0.75):
+    """
+    Continuously monitor and trade multiple stocks with risk management and return tracking.
     
-    data = get_stock_data(stock_symbol, start_date, end_date)
-    max_high = data['high'].max()
-    latest_close = data['close'].iloc[-1]
-    
-    if latest_close > max_high:
-        print(f"Breakout detected in {stock_symbol}. Placing buy order.")
-        place_order(stock_symbol, 1, 'buy', 'market', 'gtc')
-    else:
-        print(f"No breakout in {stock_symbol}.")
+    Args:
+        stock_list: List of stock symbols to monitor.
+        qty: Quantity of contracts to trade.
+        interval: Time between each cycle in seconds (default: 1 hour).
+        stop_loss_pct: Percentage for stop loss.
+        take_profit_pct: Percentage for take profit.
+    """
+    while True:
+        for stock_symbol in stock_list:
+            try:
+                # Check for trading opportunities
+                automated_trading(stock_symbol, qty)
+                
+                # Track returns
+                track_returns(stock_symbol)  # Pass the symbol to the function
+            except Exception as e:
+                print(f"Error trading {stock_symbol}: {e}")
+        
+        # Wait for the next cycle (interval: 1 hour by default)
+        print(f"Waiting for the next cycle... ({interval / 60} minutes)\n")
+        time.sleep(interval)
 
-# Define stock symbols to monitor
-stock_symbols = ['AAPL', 'TSLA', 'MSFT']
+# 10. Execute the Trading Strategy
+if __name__ == "__main__":
+    # List of stock symbols to monitor
+    stock_list = ["AAPL", "TSLA", "AMZN", "GOOGL", "MSFT", "NVDA", "INTC", "LUNR", "ASTS"]
 
-# Run strategies
-for symbol in stock_symbols:
-    print(f"Running strategies for {symbol}...")
-    momentum_strategy(symbol)
-    breakout_strategy(symbol)
+    # Start monitoring and trading stocks
+    continuous_trading(stock_list, qty=1, interval=300, stop_loss_pct=0.25, take_profit_pct=0.75)
+
