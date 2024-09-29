@@ -1,6 +1,8 @@
 aiohappyeyeballs==2.4.0
 aiohttp==3.10.5
 aiosignal==1.3.1
+alpaca==1.0.0
+alpaca-py==0.30.1
 alpaca-trade-api==3.2.0
 alpaca-trade-api-fixed==0.26
 anaconda==0.0.1.1
@@ -80,6 +82,7 @@ tzdata==2024.1
 u==0.1
 urllib3==1.26.19
 uv==0.4.17
+vadersentiment==3.3.2
 wcwidth==0.2.13
 webencodings==0.5.1
 websocket-client==1.8.0
