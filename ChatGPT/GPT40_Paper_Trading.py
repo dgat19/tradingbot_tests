@@ -8,6 +8,7 @@ from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType, OrderClass, OrderStatus
 import time
 import requests
+import sys
 from bs4 import BeautifulSoup
 
 # Set up your Alpaca API keys (Replace with your own)
@@ -146,15 +147,17 @@ def continuous_trading(stock_list, qty=1, interval=300):
         
         # Countdown timer
         for remaining in range(interval, 0, -1):
-            print(f"Next refresh in {remaining} seconds...", end='\r')
+            sys.stdout.write(f"\rNext refresh in {remaining} seconds...   ")
+            sys.stdout.flush()  # Ensure the buffer is flushed and output is updated
             time.sleep(1)
-
-        print() 
+        
+        sys.stdout.write("\rNext refresh in 0 seconds...    \n")  # Clear the line at the end
+        sys.stdout.flush()
 
 # 9. Execute the Trading Strategy
 if __name__ == "__main__":
     # List of stock symbols to monitor
-    stock_list = ["AAPL", "TSLA", "AMZN", "GOOGL", "MSFT"]
+    stock_list = ["AAPL", "TSLA", "AMZN", "GOOGL", "MSFT", "NVDA", "AVGO", "INTC", "ASTS", "LUNR"]
 
     # Start monitoring and trading options
     continuous_trading(stock_list, qty=1, interval=300)

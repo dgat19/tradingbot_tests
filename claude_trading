@@ -10,21 +10,38 @@ from bs4 import BeautifulSoup
 import logging
 from dotenv import load_dotenv
 import os
-
-# Load environment variables
-load_dotenv()
+import sys
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
 
 # Set up your Alpaca API keys
 ALPACA_API_KEY = os.getenv("PK9RIB7H3DVU9FMHROR7")
 ALPACA_API_SECRET = os.getenv("dvwSlk4p1ZKBqPsLGJbehu1dAcd82MSwLJ5BgHVh")
 ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
 
-trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
+# Check if API keys are loaded
+if not ALPACA_API_KEY or not ALPACA_API_SECRET:
+    logger.error("API keys not found. Please check your .env file.")
+    sys.exit(1)
+
 logger.info("Starting the script...")
+
+# Initialize TradingClient with error handling
+try:
+    trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
+    logger.info("TradingClient initialized successfully.")
+except ValueError as e:
+    logger.error(f"Error initializing TradingClient: {e}")
+    logger.error("Please check your API keys and ensure they are correct.")
+    sys.exit(1)
+except Exception as e:
+    logger.error(f"Unexpected error initializing TradingClient: {e}")
+    sys.exit(1)
 
 # Verify Alpaca connection
 try:
