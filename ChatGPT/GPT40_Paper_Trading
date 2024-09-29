@@ -144,9 +144,12 @@ def continuous_trading(stock_list, qty=1, interval=300):
             except Exception as e:
                 print(f"Error trading {stock_symbol}: {e}")
         
-        # Wait for the next cycle
-        print(f"Waiting for the next cycle... ({interval / 60} minutes)\n")
-        time.sleep(interval)
+        # Countdown timer
+        for remaining in range(interval, 0, -1):
+            print(f"Next refresh in {remaining} seconds...", end='\r')
+            time.sleep(1)
+
+        print() 
 
 # 9. Execute the Trading Strategy
 if __name__ == "__main__":
