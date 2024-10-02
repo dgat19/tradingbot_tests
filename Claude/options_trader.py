@@ -1,22 +1,46 @@
 import yfinance as yf
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderType, OrderClass, OrderStatus
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderType #, OrderClass, OrderStatus
 import time
 import sys
+import requests
+import contextlib
+import os
 from datetime import datetime, timedelta
 from news_scraper import get_news_sentiment
 from indicators import analyze_indicators, get_stock_volatility
+from bs4 import BeautifulSoup
 
 # Set up your Alpaca API keys (Replace with your own)
 ALPACA_API_KEY = "PK9RIB7H3DVU9FMHROR7"
 ALPACA_API_SECRET = "dvwSlk4p1ZKBqPsLGJbehu1dAcd82MSwLJ5BgHVh"
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
+# Verify Alpaca connection
+try:
+    account = trading_client.get_account()
+    print(f"Account status: {account.status}")
+    print(f"Account balance: {account.cash}")
+    print(f"Account cash withdrawal: {account.options_buying_power}")
+except Exception as e:
+    print(f"Error connecting to Alpaca API: {e}")
+
+@contextlib.contextmanager
+def suppress_stdout():
+    with open(os.devnull, 'w') as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+
 def get_current_stock_data(symbol):
     try:
         stock = yf.Ticker(symbol)
-        hist = stock.history(period="1d")
+        with suppress_stdout():
+            hist = stock.history(period="1d")
         if hist.empty:
             print(f"No data available for {symbol}")
             return None, None, None
@@ -53,7 +77,57 @@ def get_options_chain(symbol):
         print(f"Error fetching options chain for {symbol}: {str(e)}")
         return None
 
-# ... (rest of the functions remain the same)
+def place_option_trade(contract_symbol, qty, option_type='call'):
+    try:
+        order_data = MarketOrderRequest(
+            symbol=contract_symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            time_in_force=TimeInForce.GTC
+        )
+        order = trading_client.submit_order(order_data)
+        print(f"Order placed for {contract_symbol}: {order}")
+        return order
+    except Exception as e:
+        print(f"Error placing order for {contract_symbol}: {str(e)}")
+        return None
+
+def check_and_close_trade(entry_price, contract_symbol, qty):
+    # Define your logic to check and close trades here
+    print(f"Checking and closing trades for: {contract_symbol} with entry price: {entry_price} and quantity: {qty}")
+
+def get_top_active_movers():
+    try:
+        url = "https://finance.yahoo.com/markets/stocks/most-active/"
+        response = requests.get(url)
+        response.raise_for_status()
+        response.encoding = 'utf-8'  # Set the encoding to handle special characters
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        stock_list = []
+        
+        # Find the table containing the most active stocks
+        table = soup.find('tbody', {'class': 'body yf-1dbt8wv'})
+        if table:
+            rows = table.find_all('tr')  # Get all rows
+            for row in rows:
+                cols = row.find_all('td')
+                if cols:
+                    symbol = cols[0].find('span', {'class': 'symbol'}).text.strip()
+                    change_percent = cols[3].find('fin-streamer').text.strip()
+                    volume = cols[4].find('fin-streamer').text.strip()
+                    avg_volume = cols[5].text.strip()
+                    stock_list.append({
+                        'symbol': symbol,
+                        'change_percent': change_percent,
+                        'volume': volume,
+                        'avg_volume': avg_volume
+                    })
+        return stock_list
+    except Exception as e:
+        print(f"Error fetching top active movers: {str(e)}")
+        return []
 
 def automated_trading(stock_symbol, qty=1):
     # Get current stock data
@@ -62,28 +136,35 @@ def automated_trading(stock_symbol, qty=1):
         print(f"Skipping {stock_symbol} due to data retrieval error")
         return
 
-    print(f"\n{stock_symbol} - Current Price: ${current_price:.2f}, Volume: {current_volume:,}, Volatility: {volatility:.4f}")
+    # Get top active movers data
+    stock_list = get_top_active_movers()
+    stock_data = next((stock for stock in stock_list if stock['symbol'] == stock_symbol), None)
+    if not stock_data:
+        print(f"No active mover data found for {stock_symbol}")
+        return
 
-    # Get news sentiment
+    change_percent = stock_data['change_percent']
+    volume = stock_data['volume']
+    avg_volume = stock_data['avg_volume']
+
+    print(f"\n{stock_symbol} - Current Price: ${current_price:.2f}, Change %: {change_percent} \nVolume: {volume}, Avg Volume: {avg_volume} \nVolatility: {volatility:.4f}")
+
+    # Get news sentiment, indicators, options chain
     sentiment_score = get_news_sentiment(stock_symbol)
-    print(f"{stock_symbol} - Sentiment Score: {sentiment_score:.4f}")
-    
-    # Get indicators
     indicators = analyze_indicators(stock_symbol)
+    options_chain = get_options_chain(stock_symbol)
+
+    print(f"{stock_symbol} - Sentiment Score: {sentiment_score:.4f}")
     print(f"{stock_symbol} - Monthly Performance: {indicators['monthly_performance']:.4f}")
     print(f"{stock_symbol} - High Volume: {'Yes' if indicators['high_volume'] else 'No'}")
     print(f"{stock_symbol} - Positive Trend: {'Yes' if indicators['positive_trend'] else 'No'}")
     
-    # Get options chain
-    options_chain = get_options_chain(stock_symbol)
     if options_chain is None:
         print(f"Skipping {stock_symbol} due to options data retrieval error")
         return
 
-    # Decision logic based on sentiment, indicators, and options
+    # Decision logic based on volume and trend analysis
     should_trade = (
-        sentiment_score > 0.05 and
-        indicators['monthly_performance'] > 0 and
         indicators['high_volume'] and
         indicators['positive_trend'] and
         volatility > 1
@@ -108,14 +189,17 @@ def automated_trading(stock_symbol, qty=1):
     else:
         print(f"{stock_symbol} - No significant action - indicators not met")
 
-def continuous_trading(stock_list, qty=1, interval=180):
+def continuous_trading(qty=1, interval=180):
     while True:
         print("\n--- Starting new trading cycle ---")
-        for stock_symbol in stock_list:
+        stock_list = get_top_active_movers()
+        for stock in stock_list:
             try:
-                automated_trading(stock_symbol, qty)
+                print(f"Symbol: {stock['symbol']}, Change %: {stock['change_percent']}, Volume: {stock['volume']}, Avg Volume: {stock['avg_volume']}")
+                automated_trading(stock['symbol'], qty)
+                print("----------------------------------------------------------------------------------------------------")
             except Exception as e:
-                print(f"Error trading {stock_symbol}: {e}")
+                print(f"Error trading {stock['symbol']}: {e}")
         
         print(f"\nWaiting {interval} seconds before next cycle...")
         for remaining in range(interval, 0, -1):
@@ -127,5 +211,4 @@ def continuous_trading(stock_list, qty=1, interval=180):
         sys.stdout.flush()
 
 if __name__ == "__main__":
-    stock_list = ["AAPL", "TSLA", "AMZN", "GOOGL", "MSFT", "NVDA", "AVGO", "INTC", "ASTS", "LUNR"]
-    continuous_trading(stock_list, qty=1, interval=180)
+    continuous_trading(qty=1, interval=180)
