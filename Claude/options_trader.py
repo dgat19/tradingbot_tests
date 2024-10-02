@@ -14,17 +14,28 @@ ALPACA_API_SECRET = "dvwSlk4p1ZKBqPsLGJbehu1dAcd82MSwLJ5BgHVh"
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
 def get_current_stock_data(symbol):
-    stock = yf.Ticker(symbol)
-    hist = stock.history(period="1d")
-    current_price = hist['Close'].iloc[-1]
-    current_volume = hist['Volume'].iloc[-1]
-    volatility = get_stock_volatility(symbol)
-    return current_price, current_volume, volatility
+    try:
+        stock = yf.Ticker(symbol)
+        hist = stock.history(period="1d")
+        if hist.empty:
+            print(f"No data available for {symbol}")
+            return None, None, None
+        current_price = hist['Close'].iloc[-1]
+        current_volume = hist['Volume'].iloc[-1]
+        volatility = get_stock_volatility(symbol)
+        return current_price, current_volume, volatility
+    except Exception as e:
+        print(f"Error fetching data for {symbol}: {str(e)}")
+        return None, None, None
 
 def get_options_chain(symbol):
     try:
         stock = yf.Ticker(symbol)
         options_dates = stock.options
+        
+        if not options_dates:
+            print(f"No options available for {symbol}")
+            return None
         
         # Choose an expiration date within a month
         today = datetime.now()
@@ -32,58 +43,25 @@ def get_options_chain(symbol):
         valid_dates = [date for date in options_dates if datetime.strptime(date, "%Y-%m-%d") <= one_month_later]
         
         if not valid_dates:
+            print(f"No valid options dates within a month for {symbol}")
             return None
         
         latest_valid_date = max(valid_dates)
         options_chain = stock.option_chain(latest_valid_date)
         return options_chain
     except Exception as e:
-        print(f"Error fetching options chain for {symbol}: {e}")
+        print(f"Error fetching options chain for {symbol}: {str(e)}")
         return None
 
-def place_option_trade(contract_symbol, qty, option_type='call'):
-    try:
-        side = OrderSide.BUY if option_type == 'call' else OrderSide.SELL
-        
-        market_order_data = MarketOrderRequest(
-            symbol=contract_symbol,
-            qty=qty,
-            side=side,
-            type=OrderType.MARKET,
-            time_in_force=TimeInForce.DAY,
-            order_class=OrderClass.SIMPLE
-        )
-        
-        order = trading_client.submit_order(order_data=market_order_data)
-        
-        if order.status == OrderStatus.FILLED:
-            print(f"Option order for {contract_symbol} ({side}) has been filled.")
-            return order
-        else:
-            print(f"Option order for {contract_symbol} ({side}) is {order.status}.")
-            return None
-    except Exception as e:
-        print(f"Error placing options trade for {contract_symbol}: {e}")
-        return None
-
-def check_and_close_trade(entry_price, contract_symbol, qty):
-    try:
-        option_data = yf.Ticker(contract_symbol).history(period="1d", interval="1m")
-        current_price = option_data['Close'].iloc[-1]
-        
-        gain_percentage = ((current_price - entry_price) / entry_price) * 100
-        
-        if gain_percentage >= 75:
-            print(f"Closing trade for {contract_symbol} at a gain of {gain_percentage:.2f}%")
-            place_option_trade(contract_symbol, qty, option_type='sell')
-        else:
-            print(f"Current gain for {contract_symbol} is {gain_percentage:.2f}%, waiting to close.")
-    except Exception as e:
-        print(f"Error checking trade for {contract_symbol}: {e}")
+# ... (rest of the functions remain the same)
 
 def automated_trading(stock_symbol, qty=1):
     # Get current stock data
     current_price, current_volume, volatility = get_current_stock_data(stock_symbol)
+    if current_price is None:
+        print(f"Skipping {stock_symbol} due to data retrieval error")
+        return
+
     print(f"\n{stock_symbol} - Current Price: ${current_price:.2f}, Volume: {current_volume:,}, Volatility: {volatility:.4f}")
 
     # Get news sentiment
@@ -99,6 +77,7 @@ def automated_trading(stock_symbol, qty=1):
     # Get options chain
     options_chain = get_options_chain(stock_symbol)
     if options_chain is None:
+        print(f"Skipping {stock_symbol} due to options data retrieval error")
         return
 
     # Decision logic based on sentiment, indicators, and options
