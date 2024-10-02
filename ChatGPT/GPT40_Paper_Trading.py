@@ -147,10 +147,10 @@ def automated_trading(stock_symbol, qty=1):
     if calls is None or puts is None:
         return
 
-    if sentiment_score > 0.04 and current_volatility > 1:
+    if sentiment_score > 0.05 and current_volatility > 1:
         contract_symbol = calls.iloc[0]['contractSymbol']
         place_option_trade(stock_symbol, contract_symbol, qty=qty, option_type='call')
-    elif sentiment_score < -0.04 and current_volatility > 1:
+    elif sentiment_score < -0.05 and current_volatility > 1:
         contract_symbol = puts.iloc[0]['contractSymbol']
         place_option_trade(stock_symbol, contract_symbol, qty=qty, option_type='put')
     else:
