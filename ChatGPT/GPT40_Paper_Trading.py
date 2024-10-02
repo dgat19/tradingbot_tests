@@ -79,7 +79,7 @@ def place_option_trade(symbol, contract_symbol, qty, option_type='call'):
             qty=qty,
             side=side,
             type=OrderType.MARKET,
-            time_in_force=TimeInForce.GTC,
+            time_in_force=TimeInForce.DAY,
             order_class=OrderClass.SIMPLE
         )
         
