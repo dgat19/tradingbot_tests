@@ -7,6 +7,7 @@ from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType, OrderClass, OrderStatus
 import time
 import requests
+import sys
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
 
@@ -125,7 +126,13 @@ def place_option_trade(symbol, contract_symbol, qty, option_type='call'):
     except Exception as e:
         print(f"Error placing options trade for {symbol}: {e}")
 
-# 7. Main Automated Trading Loop
+# 7. Fetch Live Stock Data (this resolves the `fetch_live_data` error)
+def fetch_live_data(symbol):
+    stock = yf.Ticker(symbol)
+    stock_data = stock.history(period="1d", interval="1m")
+    return stock_data.iloc[-1]
+
+# 8. Main Automated Trading Loop
 def automated_trading(stock_symbol, qty=1):
     headlines = scrape_news(stock_symbol)
     sentiment_score = analyze_sentiment(headlines)
@@ -149,8 +156,8 @@ def automated_trading(stock_symbol, qty=1):
     else:
         print(f"No significant action for {stock_symbol} - sentiment: {sentiment_score}, volatility: {current_volatility}")
 
-# 8. Continuous Trading
-def continuous_trading(stock_list, qty=1, interval=300):
+# 9. Continuous Trading
+def continuous_trading(stock_list, qty=1, interval=180):
     while True:
         for stock_symbol in stock_list:
             try:
