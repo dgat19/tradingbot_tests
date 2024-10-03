@@ -86,7 +86,7 @@ def MACD_Strategy(df, risk):
     for i in range(0, len(df)):
         if df['MACD_12_26_9'][i] > df['MACDs_12_26_9'][i] :
             MACD_Sell.append(np.nan)
-            if position ==False:
+            if position == False:
                 MACD_Buy.append(df['Adj Close'][i])
                 position=True
             else:
