@@ -5,6 +5,7 @@ from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
 import time
 import sys
+import logging
 from news_scraper import get_top_active_movers
 from indicators import get_trend_indicator, get_volume_indicator
 from ml_trade_performance_evaluation import load_trade_data, train_model, evaluate_trade, adjust_strategy_based_on_model
@@ -84,8 +85,6 @@ def trade_hardcoded_stocks(qty=1):
             place_trade_for_hardcoded(stock_symbol, trend, volume_signal, qty)
 
 def place_trade_for_hardcoded(stock_symbol, trend, volume_signal, qty=1):
-    current_price = yf.Ticker(stock_symbol).history(period="1d")["Close"].iloc[-1]
-    
     if trend > 0 and volume_signal:  # Upward trend, buy calls
         place_trade(stock_symbol, qty, option_type='call')
     elif trend < 0 and volume_signal:  # Downward trend, buy puts
@@ -96,9 +95,6 @@ def automated_trading(stock_symbol, qty=1):
     
     stock = yf.Ticker(stock_symbol)
     stock_price = stock.history(period="1d")["Close"].iloc[-1]
-
-    # Remove the unused current_price variable
-    # current_price = stock_price
 
     # Get trend and volume indicators
     trend = get_trend_indicator(stock_symbol)
