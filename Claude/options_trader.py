@@ -24,6 +24,7 @@ try:
 except Exception as e:
     print(f"Error connecting to Alpaca API: {e}")
 
+
 @contextlib.contextmanager
 def suppress_stdout():
     with open(os.devnull, 'w') as devnull:
