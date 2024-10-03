@@ -756,3 +756,104 @@
 2024-10-03 12:24:22,238 - Trade evaluation for CCL: Expected outcome: Loss
 2024-10-03 12:24:22,239 - Adjusting strategy for CCL to avoid losses...
 2024-10-03 12:24:22,239 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for CCL
+2024-10-03 15:32:21,204 - 
+--- Starting new trading cycle ---
+2024-10-03 15:32:21,530 - Symbol: NVDA, Change %: +3.37%
+2024-10-03 15:32:22,128 - Trade evaluation for NVDA: Expected outcome: Loss
+2024-10-03 15:32:22,128 - Adjusting strategy for NVDA to avoid losses...
+2024-10-03 15:32:22,128 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for NVDA
+2024-10-03 15:32:22,129 - Symbol: NIO, Change %: -7.07%
+2024-10-03 15:32:22,461 - Trade evaluation for NIO: Expected outcome: Loss
+2024-10-03 15:32:22,461 - Adjusting strategy for NIO to avoid losses...
+2024-10-03 15:32:22,461 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for NIO
+2024-10-03 15:32:22,462 - Symbol: INND, Change %: 0.00%
+2024-10-03 15:32:22,925 - Trade evaluation for INND: Expected outcome: Loss
+2024-10-03 15:32:22,925 - Adjusting strategy for INND to avoid losses...
+2024-10-03 15:32:22,925 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for INND
+2024-10-03 15:32:22,926 - Symbol: TSLA, Change %: -3.36%
+2024-10-03 15:32:23,240 - Trade evaluation for TSLA: Expected outcome: Loss
+2024-10-03 15:32:23,240 - Adjusting strategy for TSLA to avoid losses...
+2024-10-03 15:32:23,240 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for TSLA
+2024-10-03 15:32:23,241 - Symbol: SWN, Change %: -0.56%
+2024-10-03 15:32:23,368 - $SWN: possibly delisted; No price data found  (period=1d)
+2024-10-03 15:32:23,368 - Error trading SWN: single positional indexer is out-of-bounds
+2024-10-03 15:32:23,368 - Symbol: PLTR, Change %: +4.67%
+2024-10-03 15:32:23,710 - Trade evaluation for PLTR: Expected outcome: Loss
+2024-10-03 15:32:23,710 - Adjusting strategy for PLTR to avoid losses...
+2024-10-03 15:32:23,710 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for PLTR
+2024-10-03 15:32:23,711 - Symbol: ABEV, Change %: -3.12%
+2024-10-03 15:32:24,354 - Trade evaluation for ABEV: Expected outcome: Loss
+2024-10-03 15:32:24,354 - Adjusting strategy for ABEV to avoid losses...
+2024-10-03 15:32:24,354 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for ABEV
+2024-10-03 15:32:24,355 - Symbol: VALE, Change %: -2.55%
+2024-10-03 15:32:24,843 - Trade evaluation for VALE: Expected outcome: Loss
+2024-10-03 15:32:24,843 - Adjusting strategy for VALE to avoid losses...
+2024-10-03 15:32:24,843 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for VALE
+2024-10-03 15:32:24,844 - Symbol: INTC, Change %: -0.58%
+2024-10-03 15:32:25,392 - Trade evaluation for INTC: Expected outcome: Loss
+2024-10-03 15:32:25,392 - Adjusting strategy for INTC to avoid losses...
+2024-10-03 15:32:25,392 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for INTC
+2024-10-03 15:32:25,393 - Symbol: F, Change %: -0.29%
+2024-10-03 15:32:25,905 - Trade evaluation for F: Expected outcome: Loss
+2024-10-03 15:32:25,905 - Adjusting strategy for F to avoid losses...
+2024-10-03 15:32:25,905 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for F
+2024-10-03 15:32:25,906 - Symbol: NU, Change %: -0.91%
+2024-10-03 15:32:26,504 - Trade evaluation for NU: Expected outcome: Loss
+2024-10-03 15:32:26,505 - Adjusting strategy for NU to avoid losses...
+2024-10-03 15:32:26,505 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for NU
+2024-10-03 15:32:26,505 - Symbol: BBD, Change %: -1.68%
+2024-10-03 15:32:26,961 - Trade evaluation for BBD: Expected outcome: Loss
+2024-10-03 15:32:26,961 - Adjusting strategy for BBD to avoid losses...
+2024-10-03 15:32:26,961 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for BBD
+2024-10-03 15:32:26,962 - Symbol: AAL, Change %: +0.74%
+2024-10-03 15:32:27,239 - Trade evaluation for AAL: Expected outcome: Loss
+2024-10-03 15:32:27,240 - Adjusting strategy for AAL to avoid losses...
+2024-10-03 15:32:27,240 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for AAL
+2024-10-03 15:32:27,240 - Symbol: JD, Change %: -0.45%
+2024-10-03 15:32:27,627 - Trade evaluation for JD: Expected outcome: Loss
+2024-10-03 15:32:27,627 - Adjusting strategy for JD to avoid losses...
+2024-10-03 15:32:27,627 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for JD
+2024-10-03 15:32:27,628 - Symbol: AMD, Change %: +1.92%
+2024-10-03 15:32:27,950 - Trade evaluation for AMD: Expected outcome: Loss
+2024-10-03 15:32:27,950 - Adjusting strategy for AMD to avoid losses...
+2024-10-03 15:32:27,950 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for AMD
+2024-10-03 15:32:27,951 - Symbol: SMCI, Change %: -1.07%
+2024-10-03 15:32:28,303 - Trade evaluation for SMCI: Expected outcome: Loss
+2024-10-03 15:32:28,303 - Adjusting strategy for SMCI to avoid losses...
+2024-10-03 15:32:28,303 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for SMCI
+2024-10-03 15:32:28,304 - Symbol: BABA, Change %: -2.09%
+2024-10-03 15:32:28,614 - Trade evaluation for BABA: Expected outcome: Loss
+2024-10-03 15:32:28,614 - Adjusting strategy for BABA to avoid losses...
+2024-10-03 15:32:28,614 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for BABA
+2024-10-03 15:32:28,614 - Symbol: WBD, Change %: -2.89%
+2024-10-03 15:32:28,967 - Trade evaluation for WBD: Expected outcome: Loss
+2024-10-03 15:32:28,967 - Adjusting strategy for WBD to avoid losses...
+2024-10-03 15:32:28,967 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for WBD
+2024-10-03 15:32:28,968 - Symbol: SOFI, Change %: +0.51%
+2024-10-03 15:32:29,306 - Trade evaluation for SOFI: Expected outcome: Loss
+2024-10-03 15:32:29,306 - Adjusting strategy for SOFI to avoid losses...
+2024-10-03 15:32:29,306 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for SOFI
+2024-10-03 15:32:29,307 - Symbol: IQ, Change %: -6.58%
+2024-10-03 15:32:29,611 - Trade evaluation for IQ: Expected outcome: Loss
+2024-10-03 15:32:29,611 - Adjusting strategy for IQ to avoid losses...
+2024-10-03 15:32:29,611 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for IQ
+2024-10-03 15:32:29,612 - Symbol: BEKE, Change %: +4.64%
+2024-10-03 15:32:29,955 - Trade evaluation for BEKE: Expected outcome: Loss
+2024-10-03 15:32:29,955 - Adjusting strategy for BEKE to avoid losses...
+2024-10-03 15:32:29,955 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for BEKE
+2024-10-03 15:32:29,956 - Symbol: CCL, Change %: -2.09%
+2024-10-03 15:32:30,451 - Trade evaluation for CCL: Expected outcome: Loss
+2024-10-03 15:32:30,451 - Adjusting strategy for CCL to avoid losses...
+2024-10-03 15:32:30,451 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for CCL
+2024-10-03 15:32:30,452 - Symbol: AAPL, Change %: -0.49%
+2024-10-03 15:32:30,869 - Trade evaluation for AAPL: Expected outcome: Loss
+2024-10-03 15:32:30,869 - Adjusting strategy for AAPL to avoid losses...
+2024-10-03 15:32:30,869 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for AAPL
+2024-10-03 15:32:30,870 - Symbol: GRAB, Change %: -1.86%
+2024-10-03 15:32:31,181 - Trade evaluation for GRAB: Expected outcome: Loss
+2024-10-03 15:32:31,181 - Adjusting strategy for GRAB to avoid losses...
+2024-10-03 15:32:31,181 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for GRAB
+2024-10-03 15:32:31,183 - Symbol: MARA, Change %: +1.71%
+2024-10-03 15:32:31,518 - Trade evaluation for MARA: Expected outcome: Loss
+2024-10-03 15:32:31,518 - Adjusting strategy for MARA to avoid losses...
+2024-10-03 15:32:31,519 - Consider adjusting entry point, price levels, or wait for better sentiment/volatility for MARA
