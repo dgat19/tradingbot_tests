@@ -1,10 +1,17 @@
 
 import yfinance as yf
-from datetime import datetime, timedelta
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
 import time
 import sys
-
 from indicators import get_trend_indicator, get_volume_indicator
+from datetime import datetime, timedelta
+
+# Alpaca API keys - ensure to replace with your actual keys or environment variables
+ALPACA_API_KEY = "your_alpaca_api_key"
+ALPACA_API_SECRET = "your_alpaca_api_secret"
+trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)  # Paper trading mode
 
 def get_options_chain(symbol, expiration=None):
     stock = yf.Ticker(symbol)
@@ -18,9 +25,22 @@ def get_options_chain(symbol, expiration=None):
     return None
 
 def place_option_trade(contract_symbol, qty=1, option_type='call'):
-    # Simulate placing the option trade. In a real environment, you'd use Alpaca or another broker API.
-    print(f"Placing {option_type.upper()} order for {contract_symbol}, Quantity: {qty}")
-    return True  # Return True to simulate a successful trade
+    # Use Alpaca API to place an order
+    try:
+        print(f"Placing {option_type.upper()} order for {contract_symbol}, Quantity: {qty}")
+        order = MarketOrderRequest(
+            symbol=contract_symbol,
+            qty=qty,
+            side=OrderSide.BUY if option_type == 'call' else OrderSide.SELL,
+            type=OrderType.MARKET,
+            time_in_force=TimeInForce.DAY
+        )
+        trading_client.submit_order(order)
+        print(f"{option_type.capitalize()} order placed for {contract_symbol}")
+        return True
+    except Exception as e:
+        print(f"Error placing order for {contract_symbol}: {e}")
+        return False
 
 def check_and_close_trade(entry_price, contract_symbol, qty=1):
     # Simulate checking and closing the trade.
