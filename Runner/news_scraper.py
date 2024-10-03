@@ -57,3 +57,30 @@ def get_top_active_movers():
     except Exception as e:
         print(f"Error fetching top active movers: {str(e)}")
         return []
+
+# Function to scrape trending stocks from the provided URL
+def get_trending_stocks():
+    url = "https://finance.yahoo.com/markets/stocks/trending/"
+    
+    try:
+        # Fetch the page
+        response = requests.get(url)
+        response.raise_for_status()  # Check if request was successful
+
+        # Parse the HTML content using BeautifulSoup
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Find the section that contains trending stocks (usually in a table or list)
+        trending_stocks = []
+
+        # Yahoo Finance typically stores stock symbols within 'a' tags that contain '/quote/' in the href
+        for link in soup.find_all('a', href=True):
+            if '/quote/' in link['href'] and 'p=' in link['href']:
+                stock_symbol = link['href'].split('/quote/')[1].split('?')[0]  # Extract stock symbol
+                trending_stocks.append(stock_symbol)
+
+        return trending_stocks
+
+    except Exception as e:
+        print(f"Error scraping trending stocks: {str(e)}")
+        return []

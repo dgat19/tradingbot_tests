@@ -1,12 +1,13 @@
-# Machine learning trade performance evaluation script.
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier, GradientBoostingClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import classification_report
+import joblib
+from joblib import dump, load
 
 # Placeholder for trade data, could be expanded with real-time collected data
 def load_trade_data():
-    # Simulated trade data (in practice, this would be pulled from logs)
     data = {
         'stock_symbol': ['AAPL', 'MSFT', 'NVDA', 'INTC', 'AVGO', 'LUNR', 'ASTS'],
         'price_at_trade': [150.0, 290.0, 560.0, 48.0, 620.0, 10.0, 5.0],
@@ -19,28 +20,51 @@ def load_trade_data():
     }
     return pd.DataFrame(data)
 
-def train_model(trade_data):
-    # Preprocess the data: convert categorical features, separate inputs and outputs
-    X = trade_data[['price_at_trade', 'volatility', 'volume_signal', 'market_sentiment']]
-    y = (trade_data['profit_percentage'] > 0).astype(int)  # 1 for profitable, 0 for loss
+def preprocess_data(trade_data):
+    # Preprocessing steps:
+    # 1. One-hot encode the 'option_type'
+    trade_data = pd.get_dummies(trade_data, columns=['option_type'], drop_first=True)
     
-    # Split data into training and testing sets
+    # 2. Scale numerical features
+    scaler = StandardScaler()
+    trade_data[['price_at_trade', 'volatility']] = scaler.fit_transform(trade_data[['price_at_trade', 'volatility']])
+    
+    return trade_data
+
+def train_model(trade_data):
+    X = trade_data[['price_at_trade', 'volatility', 'volume_signal', 'market_sentiment']]
+    y = trade_data['profit_loss']
+    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
     
-    # Train a Random Forest Classifier
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model = GradientBoostingClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
     
-    # Test the model
     y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    print(f"Model Accuracy: {accuracy * 100:.2f}%")
-    print(classification_report(y_test, y_pred))
-
+    print(classification_report(y_test, y_pred, zero_division=0))
+    
     return model
 
+def load_model():
+    # Load the previously trained model from file
+    return joblib.load("trade_model.pkl")
+
+def train_or_load_model(trade_data):
+    try:
+        model = load('trade_model.pkl')  # Load the model if it exists
+    except FileNotFoundError:
+        model = train_model(trade_data)  # Train the model if no saved model is found
+        dump(model, 'trade_model.pkl')   # Save the model for future use
+    return model
+
+def train_ensemble_model(X_train, y_train):
+    model1 = RandomForestClassifier(n_estimators=100)
+    model2 = GradientBoostingClassifier(n_estimators=100)
+    ensemble_model = VotingClassifier(estimators=[('rf', model1), ('gb', model2)], voting='soft')
+    ensemble_model.fit(X_train, y_train)
+    return ensemble_model
+
 def evaluate_trade(model, stock_symbol, price_at_trade, volatility, volume_signal, market_sentiment):
-    # Use the trained model to predict the outcome of a trade based on its features
     trade_features = pd.DataFrame([{
         'price_at_trade': price_at_trade,
         'volatility': volatility,
@@ -49,11 +73,7 @@ def evaluate_trade(model, stock_symbol, price_at_trade, volatility, volume_signa
     }])
     
     prediction = model.predict(trade_features)
-    predicted_outcome = "Profitable" if prediction[0] == 1 else "Loss"
-    
-    print(f"Trade evaluation for {stock_symbol}: Expected outcome: {predicted_outcome}")
-    
-    return prediction[0]
+    return prediction[0]  # 1 for profit, 0 for loss
 
 def adjust_strategy_based_on_model(model, stock_symbol, price_at_trade, volatility, volume_signal, market_sentiment):
     # Evaluate the trade using the machine learning model
@@ -61,8 +81,10 @@ def adjust_strategy_based_on_model(model, stock_symbol, price_at_trade, volatili
     
     if predicted_outcome == 0:  # If the model predicts a loss
         print(f"Adjusting strategy for {stock_symbol} to avoid losses...")
-        # Logic to adjust strategy (e.g., avoid similar trades, change entry/exit criteria)
-        # Here we could adjust the strike price, volume thresholds, or market sentiment rules
+        # Logic to adjust strategy: e.g., avoid similar trades, change entry/exit criteria
+        # Could change strike price, volume thresholds, or market sentiment rules
+        # For now, we print the adjustment:
+        print(f"Consider adjusting entry point, price levels, or wait for better sentiment/volatility for {stock_symbol}")
 
 # Main function to load data, train model, and evaluate future trades
 if __name__ == "__main__":
