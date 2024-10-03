@@ -13,8 +13,8 @@ from indicators import analyze_indicators, get_stock_volatility
 from bs4 import BeautifulSoup
 
 # Set up your Alpaca API keys (Replace with your own)
-ALPACA_API_KEY = "PK9RIB7H3DVU9FMHROR7"
-ALPACA_API_SECRET = "dvwSlk4p1ZKBqPsLGJbehu1dAcd82MSwLJ5BgHVh"
+ALPACA_API_KEY = "PKLSUU1T53HAXFDKFQMY"
+ALPACA_API_SECRET = "M46BGIZBuunwXIgDU1ttxnNj0nURPZfxt1IjLkdr"
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
 # Verify Alpaca connection

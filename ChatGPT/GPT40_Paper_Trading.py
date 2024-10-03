@@ -11,9 +11,9 @@ import sys
 from bs4 import BeautifulSoup
 
 # Set up your Alpaca API keys (Replace with your own)
-ALPACA_API_KEY = "PK9RIB7H3DVU9FMHROR7"
-ALPACA_API_SECRET = "dvwSlk4p1ZKBqPsLGJbehu1dAcd82MSwLJ5BgHVh"
-ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
+ALPACA_API_KEY = "PKLSUU1T53HAXFDKFQMY"
+ALPACA_API_SECRET = "M46BGIZBuunwXIgDU1ttxnNj0nURPZfxt1IjLkdr"
+ALPACA_BASE_URL = "https://paper-api.alpaca.markets/v2"
 api = REST(ALPACA_API_KEY, ALPACA_API_SECRET, base_url=ALPACA_BASE_URL)
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
