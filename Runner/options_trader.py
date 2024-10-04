@@ -9,6 +9,7 @@ from news_scraper import get_top_active_movers, get_trending_stocks
 from swing_trader import manage_swing_trades, swing_trade_stock
 from indicators import analyze_indicators
 from ml_trade_performance_evaluation import train_or_load_model, preprocess_data, load_trade_data
+from common_functions import get_stock_info
 
 # Set up your Alpaca API keys (Replace with your own)
 ALPACA_API_KEY = "PKV1PSBFZJSVP0SVHZ7U"
@@ -29,7 +30,7 @@ open_positions = {}
 
 # Load the ML model and preprocess the trade data
 trade_data = load_trade_data()
-X, y, scaler = preprocess_data(trade_data)  # Preprocess data
+X, X_scaled, y, scaler = preprocess_data(trade_data)  # Preprocess data
 model = train_or_load_model(X, y)
 
 # Hardcoded stock list
@@ -42,27 +43,6 @@ def check_pdt_status():
         print(f"PDT limit reached with {account.daytrade_count} day trades. Switching to swing trading.")
         return False
     return True
-
-# Function to fetch stock information from yfinance
-def get_stock_info(stock_symbol):
-    stock = yf.Ticker(stock_symbol)
-    stock_data = stock.history(period="1mo")
-    
-    if not stock_data.empty:
-        price = stock_data['Close'].iloc[-1]
-        open_price = stock_data['Open'].iloc[-1]
-        day_change = ((price - open_price) / open_price) * 100
-        volume = stock_data['Volume'].iloc[-1]
-        avg_volume = stock_data['Volume'].mean()  # Average volume
-    else:
-        price, day_change, volume, avg_volume = 0, 0, 0, 0  # Defaults in case no data is available
-    
-    return {
-        'price': price,
-        'day_change': day_change,
-        'volume': volume,
-        'avg_volume': avg_volume
-    }
 
 # Function to place an options trade using Alpaca
 def place_option_trade(stock_symbol, qty, current_price, day_change, indicators):
@@ -250,7 +230,6 @@ def get_options_chain(stock_symbol):
     except Exception as e:
         print(f"Error fetching options data for {stock_symbol}: {e}")
         return None
-
 
 # Function to check if buying power is sufficient
 def check_buying_power(required_buying_power):

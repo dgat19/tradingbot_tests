@@ -3,7 +3,7 @@ import pandas as pd
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
-from options_trader import get_stock_info
+from common_functions import get_stock_info
 
 # Set up your Alpaca API keys (Replace with your own)
 ALPACA_API_KEY = "PKV1PSBFZJSVP0SVHZ7U"
@@ -104,13 +104,17 @@ def manage_swing_trades(stock_list, qty, model, scaler):
 
         print(f"Attempting swing trade: Buying {stock_symbol} at {current_price}")
 
-        # Prepare features for prediction
+        # Prepare features for prediction (ensure feature order matches training)
         features = pd.DataFrame([{
             'price_at_trade': current_price,
-            'volatility': get_stock_volatility(stock_symbol),
+            'volatility': 0.3,  # Set volatility or retrieve it using a proper function
             'volume': current_volume,
             'avg_volume': avg_volume
         }])
+
+        # Ensure columns match the order and names used during training
+        feature_columns = ['price_at_trade', 'volatility', 'volume', 'avg_volume']  
+        features = features[feature_columns]  # Ensure the correct order
 
         # Scale the features
         scaled_features = scaler.transform(features)
@@ -120,7 +124,7 @@ def manage_swing_trades(stock_list, qty, model, scaler):
 
         if predicted_outcome == 1:  # Model predicts profit
             print(f"Placing swing trade for {stock_symbol}")
-            swing_trade_stock(stock_symbol, qty, model, scaler)
+            swing_trade_stock(stock_symbol, qty)
         else:
             print(f"Skipping swing trade for {stock_symbol} due to predicted negative return.")
 

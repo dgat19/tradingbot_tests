@@ -22,18 +22,18 @@ def load_trade_data():
     }
     return pd.DataFrame(data)
 
-# Preprocessing: One-hot encoding, scaling, and splitting data
+# Preprocessing data (ensure consistent features between training and prediction)
 def preprocess_data(trade_data):
-    # Prepare feature columns and target
-    X = trade_data[['price_at_trade', 'volatility', 'volume', 'avg_volume', 'volume_signal', 'market_sentiment']]  # Ensure these are the correct features
-    y = trade_data['profit_loss']
+    # Ensure these feature names are correct and consistent
+    feature_columns = ['price_at_trade', 'volatility', 'volume', 'avg_volume']  
+    X = trade_data[feature_columns]  # Features
+    y = trade_data['profit_loss']    # Target (ensure this is your correct target column)
 
     # Scale the numerical features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    return X, X_scaled, y, scaler  # Return the feature matrix X, scaled X, target y, and the scaler
-
+    return X, X_scaled, y, scaler  # Ensure scaler is returned for later predictions
 
 # Train a model using GradientBoostingClassifier and return the trained model
 def train_model(X, y):
@@ -49,6 +49,14 @@ def train_model(X, y):
 
 # Function to train the model or load an existing one if available
 def train_or_load_model(X, y):
+    feature_columns = ['price_at_trade', 'volatility', 'volume', 'avg_volume']  # Consistent feature columns
+
+    # Ensure X is a DataFrame so we can index by column names
+    if isinstance(X, pd.DataFrame):
+        X = X[feature_columns]  # This works if X is a DataFrame
+    else:
+        raise ValueError("X must be a DataFrame to use feature column names")
+
     model_file = 'trade_model.pkl'
     
     # Check if the model file exists
