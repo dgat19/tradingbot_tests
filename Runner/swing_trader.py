@@ -1,9 +1,12 @@
 import yfinance as yf
 import pandas as pd
+import warnings
+from joblib import load
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
 from common_functions import get_stock_info
+from indicators import calculate_rsi
 
 # Set up your Alpaca API keys (Replace with your own)
 ALPACA_API_KEY = "PKV1PSBFZJSVP0SVHZ7U"
@@ -11,6 +14,15 @@ ALPACA_API_SECRET = "vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il"
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
 open_positions = {}
+
+try:
+    model = load('trade_model.pkl')
+    scaler = load('scaler.pkl')
+    training_feature_columns = load('training_feature_columns.pkl')
+except Exception as e:
+    print(f"Error loading model or scaler: {e}")
+    # Handle the error (e.g., exit the script or retrain the model)
+
 
 def get_current_stock_data(stock_symbol):
     """
@@ -40,58 +52,67 @@ def get_current_stock_data(stock_symbol):
         print(f"Error fetching data for {stock_symbol}: {str(e)}")
         return None, None, None, None
 
+def create_features(data):
+    # Calculate technical indicators
+    data['MA_10'] = data['Close'].rolling(window=10).mean()
+    data['MA_50'] = data['Close'].rolling(window=50).mean()
+    data['RSI'] = calculate_rsi(data)
+    data = data.dropna()
+    features = data[['MA_10', 'MA_50', 'RSI']]
+    return features
+
+
 # Function to execute a swing trade based on the machine learning model prediction
-def swing_trade_stock(stock_symbol, qty, model, scaler):
-    try:
-        current_price, open_price, current_volume, avg_volume = get_current_stock_data(stock_symbol)
-        if current_price is None:
-            return None
+def swing_trade_stock(stock_symbol, qty):
+    print(f"Attempting swing trade: Buying {stock_symbol}")
 
-        print(f"Attempting swing trade: Buying {stock_symbol} at {current_price}")
+    # Ensure `model`, `scaler`, and `training_feature_columns` are accessible
+    global model, scaler, training_feature_columns
 
-        # Check if account has enough buying power
-        account = trading_client.get_account()
-        required_buying_power = qty * current_price
-        available_cash = float(account.cash)
+    # Fetch historical data for the stock
+    data = yf.download(stock_symbol, period='1y', interval='1d')
 
-        if available_cash < required_buying_power:
-            print(f"Insufficient buying power for swing trade of {stock_symbol}. Available: {available_cash}, Required: {required_buying_power}")
-            return None
+    if data.empty:
+        print(f"No data available for {stock_symbol}. Skipping.")
+        return
 
-        # Prepare input for the ML model with all relevant features
-        stock_data = pd.DataFrame([{
-            'price_at_trade': current_price,
-            'volatility': get_stock_volatility(stock_symbol),
-            'volume': current_volume,
-            'avg_volume': avg_volume
-        }])
+    # Preprocess the data to create features
+    X_new = create_features(data)
 
-        stock_data_scaled = scaler.transform(stock_data)
+    # Ensure that we have all the necessary features
+    missing_cols = set(training_feature_columns) - set(X_new.columns)
+    for col in missing_cols:
+        X_new[col] = 0  # Or another appropriate default value
 
-        # Make prediction
-        predicted_outcome = model.predict(stock_data_scaled)[0]
-        print(f"ML prediction for {stock_symbol}: {predicted_outcome}")
+    # Reorder columns to match the training data
+    X_new = X_new[training_feature_columns]
 
-        # If prediction indicates a positive outcome (e.g., 1), proceed with buying
-        if predicted_outcome == 1:
-            order_data = MarketOrderRequest(
-                symbol=stock_symbol,
-                qty=qty,
-                side=OrderSide.BUY,
-                type=OrderType.MARKET,
-                time_in_force=TimeInForce.GTC  # Good till canceled for swing trades
-            )
-            order = trading_client.submit_order(order_data)
-            print(f"Swing trade order placed for {stock_symbol} at {current_price}")
-            open_positions[stock_symbol] = current_price  # Record the purchase price
-            return order
-        else:
-            print(f"Skipping swing trade for {stock_symbol} due to predicted negative outcome.")
-            return None
+    # Drop rows with missing values if necessary
+    X_new = X_new.dropna()
 
-    except Exception as e:
-        print(f"Error placing swing trade for {stock_symbol}: {e}")
-        return None
+    if X_new.empty:
+        print(f"No data available for prediction for {stock_symbol}. Skipping.")
+        return
+
+    # Scale the features using the scaler fitted during training
+    X_new_scaled_array = scaler.transform(X_new)
+
+    # Convert the scaled array back to a DataFrame with the correct column names
+    X_new_scaled = pd.DataFrame(X_new_scaled_array, columns=training_feature_columns)
+
+    # Predict using the model
+    predicted_return = model.predict(X_new_scaled)
+
+    # Assuming the model predicts binary outcomes (1 for profit, 0 for loss)
+    if predicted_return[-1] == 1:
+        # Place the swing trade
+        print(f"Placing swing trade for {stock_symbol}")
+        # Implement the code to place the trade using Alpaca's API
+        # ... [code to place the order] ...
+    else:
+        print(f"Skipping swing trade for {stock_symbol} due to predicted negative return.")
+
+
 
 # Function to manage swing trades (only trade stocks with positive trend)
 def manage_swing_trades(stock_list, qty, model, scaler):
