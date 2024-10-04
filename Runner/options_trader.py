@@ -1,20 +1,18 @@
-import yfinance as yf
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
+import yfinance as yf
 import time
 import sys
-import contextlib
-import os
-import pytz
 from datetime import datetime, timedelta
 from news_scraper import get_top_active_movers, get_trending_stocks
-from indicators import analyze_indicators, get_stock_volatility
-from ml_trade_performance_evaluation import load_trade_data, train_model
+from swing_trader import manage_swing_trades, swing_trade_stock
+from indicators import analyze_indicators
+from ml_trade_performance_evaluation import train_or_load_model, preprocess_data, load_trade_data
 
 # Set up your Alpaca API keys (Replace with your own)
-ALPACA_API_KEY = "PKOS59NZIX9P0L8VNJK8"
-ALPACA_API_SECRET = "7eFxPPP15H3eYW3V0B5i1UdV21sCbS9oW1L4WcoA"
+ALPACA_API_KEY = "PKV1PSBFZJSVP0SVHZ7U"
+ALPACA_API_SECRET = "vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il"
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
 # Verify Alpaca connection
@@ -26,130 +24,88 @@ try:
 except Exception as e:
     print(f"Error connecting to Alpaca API: {e}")
 
-# Load trade data and train the model
+# Global variable to track open positions
+open_positions = {}
+
+# Load the ML model and preprocess the trade data
 trade_data = load_trade_data()
-model = train_model(trade_data)
+X, y, scaler = preprocess_data(trade_data)  # Preprocess data
+model = train_or_load_model(X, y)
 
-@contextlib.contextmanager
-def suppress_stdout():
-    with open(os.devnull, 'w') as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
-        try:
-            yield
-        finally:
-            sys.stdout = old_stdout
+# Hardcoded stock list
+hardcoded_stocks = ['NVDA', 'AAPL', 'MSFT', 'INTC', 'AVGO', 'LUNR', 'ASTS', 'PLTR']
 
-# Function to get the correct open price from 8:30 AM UTC (which corresponds to the market open at 9:30 AM EST)
-def get_open_price_at_market_open(symbol):
-    try:
-        stock = yf.Ticker(symbol)
-        ny_tz = pytz.timezone('America/New_York')  # U.S. Eastern Timezone
-        current_time = datetime.now(ny_tz).replace(hour=9, minute=30, second=0, microsecond=0)
-        history = stock.history(period="1d", interval="1m")
-        
-        if history.empty:
-            raise ValueError(f"No market data found for {symbol} at 9:30 AM")
-
-        open_price = history.loc[history.index == current_time]['Open'].values
-        
-        if len(open_price) == 0:
-            raise ValueError(f"No data for {symbol} at 9:30 AM")
-        
-        return open_price[0]
-    except Exception as e:
-        print(f"Error retrieving open price at market open for {symbol}: {e}")
-        return None
-
-def check_buying_power(required_buying_power):
-    try:
-        account = trading_client.get_account()
-        buying_power = float(account.cash)
-        
-        if buying_power >= required_buying_power:
-            return True
-        else:
-            print(f"Insufficient buying power. Available: {buying_power}, Required: {required_buying_power}")
-            return False
-    except Exception as e:
-        print(f"Error checking buying power: {e}")
+# Function to check if PDT rule is triggered
+def check_pdt_status():
+    account = trading_client.get_account()
+    if account.daytrade_count >= 3:
+        print(f"PDT limit reached with {account.daytrade_count} day trades. Switching to swing trading.")
         return False
+    return True
 
-def get_current_stock_data(symbol):
+# Function to fetch stock information from yfinance
+def get_stock_info(stock_symbol):
+    stock = yf.Ticker(stock_symbol)
+    stock_data = stock.history(period="1mo")
+    
+    if not stock_data.empty:
+        price = stock_data['Close'].iloc[-1]
+        open_price = stock_data['Open'].iloc[-1]
+        day_change = ((price - open_price) / open_price) * 100
+        volume = stock_data['Volume'].iloc[-1]
+        avg_volume = stock_data['Volume'].mean()  # Average volume
+    else:
+        price, day_change, volume, avg_volume = 0, 0, 0, 0  # Defaults in case no data is available
+    
+    return {
+        'price': price,
+        'day_change': day_change,
+        'volume': volume,
+        'avg_volume': avg_volume
+    }
+
+# Function to place an options trade using Alpaca
+def place_option_trade(stock_symbol, qty, current_price, day_change, indicators):
     try:
-        stock = yf.Ticker(symbol)
-        with suppress_stdout():
-            hist = stock.history(period="1d")
-        
-        if hist.empty:
-            print(f"No data available for {symbol}")
-            return None, None, None, None  # Ensure 4 values are returned
-        
-        current_price = hist['Close'].iloc[-1]
-        open_price = get_open_price_at_market_open(symbol)  # Get the 8:30 AM UTC open price
-        current_volume = hist['Volume'].iloc[-1]
-        volatility = get_stock_volatility(symbol)
+        # Fetch the options chain for the stock symbol
+        options_chain = get_options_chain(stock_symbol)
 
-        if current_price is None or open_price is None:
-            raise ValueError(f"Invalid data for {symbol}: current_price or open_price is None")
-
-        return current_price, open_price, current_volume, volatility
-    except Exception as e:
-        print(f"Error fetching data for {symbol}: {str(e)}")
-        return None, None, None, None
-
-def get_options_chain(symbol):
-    try:
-        stock = yf.Ticker(symbol)
-        options_dates = stock.options
-        
-        if not options_dates:
-            print(f"No options available for {symbol}")
-            return None
-        
-        today = datetime.now()
-        one_month_later = today + timedelta(days=30)
-        valid_dates = [date for date in options_dates if datetime.strptime(date, "%Y-%m-%d") <= one_month_later]
-        
-        if not valid_dates:
-            print(f"No valid options dates within a month for {symbol}")
-            return None
-        
-        latest_valid_date = max(valid_dates)
-        options_chain = stock.option_chain(latest_valid_date)
-        return options_chain
-    except Exception as e:
-        print(f"Error fetching options chain for {symbol}: {str(e)}")
-        return None
-
-def place_option_trade(contract_symbol, qty, option_type='call'):
-    try:
-        # Fetch the option's current price dynamically
-        stock = yf.Ticker(contract_symbol[:4])
-        options_chain = stock.option_chain()  # You might want to refine this with expiration dates
-        option_data = None
-
-        if option_type == 'call':
-            option_data = options_chain.calls[options_chain.calls['contractSymbol'] == contract_symbol]
-        elif option_type == 'put':
-            option_data = options_chain.puts[options_chain.puts['contractSymbol'] == contract_symbol]
-
-        if option_data.empty:
-            print(f"No data available for {contract_symbol}")
+        if options_chain is None:
+            print(f"No options data available for {stock_symbol}")
             return None
 
-        # Get the current price for the option
-        option_price = option_data['lastPrice'].iloc[0]
+        # Check for trend alignment and determine option type (call or put)
+        if day_change > 0 and indicators['positive_trend']:
+            # Positive trend and day change: place a CALL option
+            target_strike = current_price * 1.1  # 10% above current price
+            itm_options = options_chain.calls[options_chain.calls['strike'] >= target_strike]
+        elif day_change < 0 and not indicators['positive_trend']:
+            # Negative trend and day change: place a PUT option
+            target_strike = current_price * 0.9  # 10% below current price
+            itm_options = options_chain.puts[options_chain.puts['strike'] <= target_strike]
+        else:
+            # If trend and day change do not align, skip the trade
+            print(f"{stock_symbol} - Trend and price movement do not align for trading. Skipping.")
+            return None
 
-        # Calculate the required buying power (contract size is typically 100)
+        # Check if we have any matching in-the-money options
+        if itm_options.empty:
+            print(f"No matching options data for {stock_symbol}.")
+            return None
+
+        # Select the first available option contract
+        option_contract = itm_options.iloc[0]
+        contract_symbol = option_contract['contractSymbol']
+        option_price = option_contract['lastPrice']
+
+        # Calculate required buying power (contract size is typically 100)
         required_buying_power = option_price * qty * 100
 
-        # Check if buying power is sufficient
         if not check_buying_power(required_buying_power):
             print(f"Skipping trade for {contract_symbol} due to insufficient buying power. Required: {required_buying_power}")
             return None
 
-        # Place the order using Alpaca
+        # Place the options order
         order_data = MarketOrderRequest(
             symbol=contract_symbol,
             qty=qty,
@@ -159,148 +115,201 @@ def place_option_trade(contract_symbol, qty, option_type='call'):
         )
         order = trading_client.submit_order(order_data)
 
+        enter_trade(contract_symbol, option_price, qty)
         print(f"Order placed for {contract_symbol} at option price: {option_price}")
         return order
 
     except Exception as e:
-        print(f"Error placing order for {contract_symbol}: {e}")
+        print(f"Error placing order for {stock_symbol}: {e}")
         return None
 
+# Function to track an open trade
+def enter_trade(contract_symbol, entry_price, qty):
+    global open_positions
+    open_positions[contract_symbol] = {
+        'entry_price': entry_price,
+        'qty': qty
+    }
+    print(f"Entered trade for {contract_symbol} at {entry_price} with quantity {qty}")
+    return True
 
-def check_exit_conditions(contract_symbol, entry_price, qty):
-    try:
-        stock = yf.Ticker(contract_symbol[:4])
-        hist = stock.history(period="1d")
-        current_price = hist['Close'].iloc[-1]
-
-        if current_price <= entry_price * 0.75:
-            print(f"{contract_symbol} - Stop-loss triggered. Current price: {current_price}, Entry price: {entry_price}. Exiting trade.")
-            exit_trade(contract_symbol, qty)
-            return
-
-        if current_price >= entry_price * 1.75:
-            print(f"{contract_symbol} - Take-profit triggered. Current price: {current_price}, Entry price: {entry_price}. Exiting trade.")
-            exit_trade(contract_symbol, qty)
-            return
-    except Exception as e:
-        print(f"Error checking exit conditions for {contract_symbol}: {str(e)}")
-
-def exit_trade(contract_symbol, qty):
-    try:
-        order_data = MarketOrderRequest(
-            symbol=contract_symbol,
-            qty=qty,
-            side=OrderSide.SELL,
-            type=OrderType.MARKET,
-            time_in_force=TimeInForce.DAY
-        )
-        order = trading_client.submit_order(order_data)
-        print(f"Exited trade for {contract_symbol}")
-        return order
-    except Exception as e:
-        print(f"Error exiting trade for {contract_symbol}: {str(e)}")
-        return None
-
+# Trade logic for hardcoded stocks (only trade if day change is ±3% or more)
 def trade_hardcoded_stocks(stock_symbol, qty=1):
-    hardcoded_stocks = ['NVDA', 'AAPL', 'MSFT', 'INTC', 'AVGO', 'LUNR', 'ASTS', 'PLTR']
-    current_price, open_price, current_volume, volatility = get_current_stock_data(stock_symbol)
-    if current_price is None:
-        print(f"Skipping {stock_symbol} due to data retrieval error")
+    stock_info = get_stock_info(stock_symbol)
+    day_change = stock_info['day_change']
+    
+    # Only trade if the day change is ±3%
+    if abs(day_change) < 3:
+        print(f"Skipping {stock_symbol} due to insufficient day change (±3%). Day change: {day_change:.2f}%")
         return
-
-    price_change = ((current_price - open_price) / open_price) * 100
-
-    # If stock is in hardcoded list, follow the ±3% price movement rule
-    if stock_symbol in hardcoded_stocks and abs(price_change) >= 3:
+    
+    indicators = analyze_indicators(stock_symbol)
+    if day_change > 3 and indicators['positive_trend']:  # Buy CALL options
         options_chain = get_options_chain(stock_symbol)
-        if price_change > 3:
-            # Buy CALL options with a target strike 10% above current price for upward trend
-            target_call_strike = current_price * 1.1
+        if options_chain:
+            target_call_strike = stock_info['price'] * 1.1
             itm_calls = options_chain.calls[options_chain.calls['strike'] >= target_call_strike]
             if not itm_calls.empty:
-                option_contract = itm_calls.iloc[0]  # Closest in-the-money call
-                contract_symbol = option_contract['contractSymbol']
-                print(f"{stock_symbol} - +3% price movement detected. Placing CALL order for {contract_symbol}")
+                contract_symbol = itm_calls.iloc[0]['contractSymbol']
+                print(f"{stock_symbol} - Day change +3%. Placing CALL order for {contract_symbol}")
                 place_option_trade(contract_symbol, qty, option_type='call')
             else:
-                print(f"{stock_symbol} - No suitable ITM CALL options found")
-        elif price_change < -3:
-            # Buy PUT options with a target strike 10% below current price for downward trend
-            target_put_strike = current_price * 0.9
+                print(f"{stock_symbol} - No suitable CALL options found.")
+        else:
+            print(f"{stock_symbol} - Switching to swing trading due to no options data.")
+            swing_trade_stock(stock_symbol, qty, model, scaler)  # If no options available, switch to swing trading
+    elif day_change < -3 and not indicators['positive_trend']:  # Buy PUT options
+        options_chain = get_options_chain(stock_symbol)
+        if options_chain:
+            target_put_strike = stock_info['price'] * 0.9
             itm_puts = options_chain.puts[options_chain.puts['strike'] <= target_put_strike]
             if not itm_puts.empty:
-                option_contract = itm_puts.iloc[0]  # Closest in-the-money put
-                contract_symbol = option_contract['contractSymbol']
-                print(f"{stock_symbol} - -3% price movement detected. Placing PUT order for {contract_symbol}")
+                contract_symbol = itm_puts.iloc[0]['contractSymbol']
+                print(f"{stock_symbol} - Day change -3%. Placing PUT order for {contract_symbol}")
                 place_option_trade(contract_symbol, qty, option_type='put')
             else:
-                print(f"{stock_symbol} - No suitable ITM PUT options found")
+                print(f"{stock_symbol} - No suitable PUT options found.")
         else:
-            print(f"{stock_symbol} - No significant price movement (±3%)")
+            print(f"{stock_symbol} - Switching to swing trading due to no options data.")
+            swing_trade_stock(stock_symbol, qty, model, scaler)  # If no options available, switch to swing trading
+    else:
+        print(f"Skipping {stock_symbol}. Day change is 3% but indicators did not confirm the trend.")
 
-    # For stocks not in the hardcoded list, trade based on the trend and other indicators
-    elif stock_symbol not in hardcoded_stocks:
-        indicators = analyze_indicators(stock_symbol)
+# Trade logic for dynamically fetched stocks
+def trade_dynamic_stocks(stock_symbol, qty=1):
+    stock_info = get_stock_info(stock_symbol)
+    indicators = analyze_indicators(stock_symbol)
+    
+    # Trade if current volume is higher than the average volume
+    if stock_info['volume'] <= stock_info['avg_volume']:
+        print(f"Skipping {stock_symbol} due to insufficient volume. Volume: {int(stock_info['volume']):,}, Avg Volume: {int(stock_info['avg_volume']):,}")
+        return
+
+    if indicators['positive_trend']:  # Buy CALL options
         options_chain = get_options_chain(stock_symbol)
-
-        if indicators['positive_trend']:
-            # Buy CALL options with a target strike 10% above current price for upward trend
-            target_call_strike = current_price * 1.1
+        if options_chain:
+            target_call_strike = stock_info['price'] * 1.1
             itm_calls = options_chain.calls[options_chain.calls['strike'] >= target_call_strike]
             if not itm_calls.empty:
-                option_contract = itm_calls.iloc[0]  # Closest in-the-money call
-                contract_symbol = option_contract['contractSymbol']
+                contract_symbol = itm_calls.iloc[0]['contractSymbol']
                 print(f"{stock_symbol} - Positive trend detected. Placing CALL order for {contract_symbol}")
                 place_option_trade(contract_symbol, qty, option_type='call')
             else:
-                print(f"{stock_symbol} - No suitable ITM CALL options found")
-        elif not indicators['positive_trend']:
-            # Buy PUT options with a target strike 10% below current price for downward trend
-            target_put_strike = current_price * 0.9
+                print(f"{stock_symbol} - No suitable CALL options found.")
+                swing_trade_stock(stock_symbol, qty, model, scaler)  # Switch to swing trading
+        else:
+            print(f"{stock_symbol} - No options data available. Switching to swing trading.")
+            swing_trade_stock(stock_symbol, qty, model, scaler)  # Switch to swing trading
+    elif not indicators['positive_trend']:  # Buy PUT options
+        options_chain = get_options_chain(stock_symbol)
+        if options_chain:
+            target_put_strike = stock_info['price'] * 0.9
             itm_puts = options_chain.puts[options_chain.puts['strike'] <= target_put_strike]
             if not itm_puts.empty:
-                option_contract = itm_puts.iloc[0]  # Closest in-the-money put
-                contract_symbol = option_contract['contractSymbol']
+                contract_symbol = itm_puts.iloc[0]['contractSymbol']
                 print(f"{stock_symbol} - Negative trend detected. Placing PUT order for {contract_symbol}")
                 place_option_trade(contract_symbol, qty, option_type='put')
             else:
-                print(f"{stock_symbol} - No suitable ITM PUT options found")
+                print(f"{stock_symbol} - No suitable PUT options found.")
+                swing_trade_stock(stock_symbol, qty, model, scaler)  # Switch to swing trading
         else:
-            print(f"{stock_symbol} - No significant action or indicators not met")
+            print(f"{stock_symbol} - No options data available. Switching to swing trading.")
+            swing_trade_stock(stock_symbol, qty, model, scaler)  # Switch to swing trading
+    else:
+        print(f"{stock_symbol} - No options data available. Skipping...")
 
-# Continuous trading function
+# Function to fetch the options chain for a stock symbol
+def get_options_chain(stock_symbol):
+    try:
+        stock = yf.Ticker(stock_symbol)
+        options_dates = stock.options
+
+        if not options_dates:
+            print(f"No options available for {stock_symbol}.")
+            return None
+
+        # Get the current date and calculate the date one month from today
+        current_date = datetime.now()
+        one_month_later = current_date + timedelta(days=30)
+
+        # Find an expiration date that is closest to one month from today
+        valid_dates = [date for date in options_dates if datetime.strptime(date, "%Y-%m-%d") >= current_date]
+
+        if not valid_dates:
+            print(f"No valid expiration dates within the next month for {stock_symbol}.")
+            return None
+
+        # Use the closest valid expiration date that is at least one month away
+        chosen_expiry = min(valid_dates, key=lambda d: abs(datetime.strptime(d, "%Y-%m-%d") - one_month_later))
+
+        # Fetch the options chain for the chosen expiration date
+        options_chain = stock.option_chain(chosen_expiry)
+        print(f"Options data retrieved for {stock_symbol} with expiry {chosen_expiry}")
+        return options_chain
+
+    except Exception as e:
+        print(f"Error fetching options data for {stock_symbol}: {e}")
+        return None
+
+
+# Function to check if buying power is sufficient
+def check_buying_power(required_buying_power):
+    account = trading_client.get_account()
+    buying_power = float(account.cash)
+    
+    return buying_power >= required_buying_power
+
+# Main continuous trading loop
 def continuous_trading(qty=1, interval=180):
     while True:
         print("\n--- Starting new trading cycle ---")
-        
-        # Fetch stocks from get_top_active_movers and get_trending_stocks
+
+        # Fetch stocks for trading
         stock_list = get_top_active_movers() + get_trending_stocks()
-        
+
         for stock in stock_list:
             stock_symbol = stock['symbol']
-            try:
-                print(f"Symbol: {stock['symbol']}, Change %: {stock['change_percent']}, Volume: {stock['volume']}, Avg Volume: {stock['avg_volume']}")
-                
-                # Call the function for hardcoded stocks and stock_list
-                trade_hardcoded_stocks(stock_symbol, qty)
-                
-                print("----------------------------------------------------------------------------------------------------")
-            except Exception as e:
-                print(f"Error trading {stock_symbol}: {e}")
-        
-        print(f"\nWaiting {interval} seconds before next cycle...")
-        for remaining in range(interval, 0, -1):
-            sys.stdout.write(f"\rNext refresh in {remaining} seconds...   ")
-            sys.stdout.flush()
-            time.sleep(1)
-        
-        sys.stdout.write("\rNext refresh in 0 seconds...    \n")
+            
+            # Fetch stock data
+            stock_info = get_stock_info(stock_symbol)
+            current_price = stock_info['price']
+            day_change = stock_info['day_change']
+            volume = stock_info['volume']
+            avg_volume = stock_info['avg_volume']
+            
+            # Fetch indicators
+            indicators = analyze_indicators(stock_symbol)
+
+            # Display stock info
+            print(f"{stock_symbol} - Price: ${current_price:.2f}    "
+                  f"Day Change: {day_change:.2f}%    "
+                  f"Volume: {int(volume):,}    "
+                  f"Avg. Volume: {int(avg_volume):,}")
+
+            # Make a decision to trade or skip based on volume and indicators
+            if volume > avg_volume and (day_change > 0 or day_change < 0):
+                print(f"Placing options trade for {stock_symbol}")
+                # Attempt to place an options trade
+                if place_option_trade(stock_symbol, qty, current_price, day_change, indicators) is None:
+                    print(f"Switching to swing trading for {stock_symbol} due to no options data.")
+                    manage_swing_trades([stock_symbol], qty, model, scaler)  # Use swing trading as fallback
+            else:
+                print(f"Skipping {stock_symbol} due to volume or trend indicators.")
+            print("-" * 100)
+
+        # Countdown timer before the next trading cycle
+        print("\nWaiting for the next cycle...")
+        countdown(interval)
+
+
+# Countdown timer function
+def countdown(interval):
+    for remaining in range(interval, 0, -1):
+        sys.stdout.write(f"\rNext refresh in {remaining} seconds...   ")
         sys.stdout.flush()
-
-
+        time.sleep(1)
+    sys.stdout.write("\rNext refresh in 0 seconds...    \n")
+    sys.stdout.flush()
 
 if __name__ == "__main__":
-    trade_data = load_trade_data()
-    model = train_model(trade_data)
-    
     continuous_trading(qty=1, interval=180)

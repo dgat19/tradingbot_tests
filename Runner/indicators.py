@@ -127,7 +127,7 @@ def analyze_indicators(symbol):
     high_volume = data['Volume'].iloc[-1] > data['Volume'].mean()
     
     return {
-        "monthly_performance": data['Close'].pct_change(periods=20).iloc[-1],  # Monthly performance
+        "monthly_performance": data['Close'].pct_change(periods=20).iloc[-1],
         "positive_trend": positive_trend,
         "high_volume": high_volume,
         "rsi": rsi
