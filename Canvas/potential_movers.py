@@ -12,7 +12,7 @@ class PotentialMovers:
         movers = []
         try:
             # Fetch top movers from Yahoo Finance or another reliable source
-            response = requests.get('https://finance.yahoo.com/gainers')
+            response = requests.get('https://finance.yahoo.com/markets/stocks/gainers/')
             soup = BeautifulSoup(response.text, 'html.parser')
             table = soup.find('table', {'class': 'W(100%)'})
             rows = table.find_all('tr')[1:]
