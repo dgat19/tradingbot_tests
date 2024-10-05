@@ -14,7 +14,7 @@ class PerformanceTracker:
         self.trade_history = []
         self.model = None
         self.scaler = StandardScaler()
-        self.api = tradeapi.REST('PKV1PSBFZJSVP0SVHZ7U', 'vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il', 'https://paper-api.alpaca.markets/v2')  # Initialize Alpaca API
+        self.api = tradeapi.REST('PKV1PSBFZJSVP0SVHZ7U', 'vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il', 'https://paper-api.alpaca.markets')  # Initialize Alpaca API
         self.load_model()
         # Optimized trading parameters
         self.trailing_stop_loss = 0.10  # Reduced trailing stop loss to lock in profits sooner

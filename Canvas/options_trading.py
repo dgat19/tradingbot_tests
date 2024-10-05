@@ -5,7 +5,7 @@ import numpy as np
 class OptionsTrader:
     def __init__(self):
         # Initialize Alpaca API
-        self.api = tradeapi.REST('PKV1PSBFZJSVP0SVHZ7U', 'vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il', 'https://paper-api.alpaca.markets/v2')
+        self.api = tradeapi.REST('PKV1PSBFZJSVP0SVHZ7U', 'vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il', 'https://paper-api.alpaca.markets')
         
     def execute_strategy(self):
         trades = []
