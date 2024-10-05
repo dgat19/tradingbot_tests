@@ -5,7 +5,7 @@ from joblib import load
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
-from common_functions import get_stock_info
+from common_functions import get_stock_info, get_current_stock_data, get_stock_volatility
 from indicators import calculate_rsi
 
 # Set up your Alpaca API keys (Replace with your own)
@@ -13,163 +13,118 @@ ALPACA_API_KEY = "PKV1PSBFZJSVP0SVHZ7U"
 ALPACA_API_SECRET = "vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il"
 trading_client = TradingClient(ALPACA_API_KEY, ALPACA_API_SECRET, paper=True)
 
+# Global variable to track open positions
 open_positions = {}
 
-try:
-    model = load('trade_model.pkl')
-    scaler = load('scaler.pkl')
-    training_feature_columns = load('training_feature_columns.pkl')
-except Exception as e:
-    print(f"Error loading model or scaler: {e}")
-    # Handle the error (e.g., exit the script or retrain the model)
-
-
-def get_current_stock_data(stock_symbol):
-    """
-    Fetches the current stock data including price, open price, volume, and average volume.
-    """
+# Load the ML model and feature columns
+def load_model():
     try:
-        # Get stock data from Yahoo Finance
-        stock = yf.Ticker(stock_symbol)
-        stock_data = stock.history(period="1d", interval="1d")
-
-        if stock_data.empty:
-            print(f"No data available for {stock_symbol}")
-            return None, None, None, None
-
-        # Extract the current stock price, open price, current volume, and calculate average volume over a month
-        current_price = stock_data['Close'].iloc[-1]
-        open_price = stock_data['Open'].iloc[-1]
-        current_volume = stock_data['Volume'].iloc[-1]
-
-        # Fetch monthly data to calculate the average volume over the last 30 days
-        historical_data = stock.history(period="1mo", interval="1d")
-        avg_volume = historical_data['Volume'].mean()
-
-        return current_price, open_price, current_volume, avg_volume
-
+        model = load('trade_model.pkl')
+        scaler = load('scaler.pkl')
+        training_feature_columns = load('training_feature_columns.pkl')
+        print("Loaded existing model, scaler, and feature columns.")
     except Exception as e:
-        print(f"Error fetching data for {stock_symbol}: {str(e)}")
-        return None, None, None, None
+        print(f"Error loading model or scaler: {e}")
+        # Handle the error (e.g., exit the script or retrain the model)
+        return None, None, None
+    return model, scaler, training_feature_columns
 
+model, scaler, training_feature_columns = load_model()
+
+# Create features for prediction
 def create_features(data):
-    # Calculate technical indicators
     data['MA_10'] = data['Close'].rolling(window=10).mean()
     data['MA_50'] = data['Close'].rolling(window=50).mean()
     data['RSI'] = calculate_rsi(data)
-    data = data.dropna()
-    features = data[['MA_10', 'MA_50', 'RSI']]
-    return features
+    return data.dropna()[['MA_10', 'MA_50', 'RSI']]
 
-
-# Function to execute a swing trade based on the machine learning model prediction
+# Execute a swing trade based on ML prediction
 def swing_trade_stock(stock_symbol, qty):
-    print(f"Attempting swing trade: Buying {stock_symbol}")
+    if model is None or scaler is None or training_feature_columns is None:
+        print("Model or scaler not loaded. Cannot execute swing trade.")
+        return
 
-    # Ensure `model`, `scaler`, and `training_feature_columns` are accessible
-    global model, scaler, training_feature_columns
-
-    # Fetch historical data for the stock
     data = yf.download(stock_symbol, period='1y', interval='1d')
-
     if data.empty:
         print(f"No data available for {stock_symbol}. Skipping.")
         return
 
-    # Preprocess the data to create features
     X_new = create_features(data)
-
-    # Ensure that we have all the necessary features
     missing_cols = set(training_feature_columns) - set(X_new.columns)
     for col in missing_cols:
-        X_new[col] = 0  # Or another appropriate default value
-
-    # Reorder columns to match the training data
-    X_new = X_new[training_feature_columns]
-
-    # Drop rows with missing values if necessary
-    X_new = X_new.dropna()
+        X_new[col] = 0
+    X_new = X_new[training_feature_columns].dropna()
 
     if X_new.empty:
         print(f"No data available for prediction for {stock_symbol}. Skipping.")
         return
 
-    # Scale the features using the scaler fitted during training
-    X_new_scaled_array = scaler.transform(X_new)
-
-    # Convert the scaled array back to a DataFrame with the correct column names
-    X_new_scaled = pd.DataFrame(X_new_scaled_array, columns=training_feature_columns)
-
-    # Predict using the model
+    X_new_scaled = scaler.transform(X_new)
     predicted_return = model.predict(X_new_scaled)
 
-    # Assuming the model predicts binary outcomes (1 for profit, 0 for loss)
     if predicted_return[-1] == 1:
-        # Place the swing trade
-        print(f"Placing swing trade for {stock_symbol}")
-        # Implement the code to place the trade using Alpaca's API
-        # ... [code to place the order] ...
+        place_swing_trade(stock_symbol, qty)
     else:
         print(f"Skipping swing trade for {stock_symbol} due to predicted negative return.")
 
+# Place a swing trade using Alpaca
+def place_swing_trade(stock_symbol, qty):
+    try:
+        order_data = MarketOrderRequest(
+            symbol=stock_symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            type=OrderType.MARKET,
+            time_in_force=TimeInForce.GTC
+        )
+        trading_client.submit_order(order_data)
+        print(f"Placed swing trade for {stock_symbol}")
+        open_positions[stock_symbol] = qty
+    except Exception as e:
+        print(f"Error placing swing trade for {stock_symbol}: {e}")
 
-
-# Function to manage swing trades (only trade stocks with positive trend)
+# Manage swing trades for multiple stocks
 def manage_swing_trades(stock_list, qty, model, scaler):
     for stock_symbol in stock_list:
-        current_price, open_price, current_volume, avg_volume = get_current_stock_data(stock_symbol)
-        
-        if current_price is None:
+        stock_data = get_current_stock_data(stock_symbol)
+        if stock_data is None:
             print(f"Skipping {stock_symbol} due to data retrieval error")
             continue
 
-        print(f"Attempting swing trade: Buying {stock_symbol} at {current_price}")
-
-        # Prepare features for prediction (ensure feature order matches training)
         features = pd.DataFrame([{
-            'price_at_trade': current_price,
-            'volatility': 0.3,  # Set volatility or retrieve it using a proper function
-            'volume': current_volume,
-            'avg_volume': avg_volume
+            'price_at_trade': stock_data['current_price'],
+            'volatility': get_stock_volatility(stock_symbol),
+            'volume': stock_data['current_volume'],
+            'avg_volume': stock_data['avg_volume']
         }])
 
-        # Ensure columns match the order and names used during training
-        feature_columns = ['price_at_trade', 'volatility', 'volume', 'avg_volume']  
-        features = features[feature_columns]  # Ensure the correct order
-
-        # Scale the features
+        features = features[['price_at_trade', 'volatility', 'volume', 'avg_volume']]
         scaled_features = scaler.transform(features)
-
-        # Use the model to predict the outcome
         predicted_outcome = model.predict(scaled_features)[0]
 
-        if predicted_outcome == 1:  # Model predicts profit
-            print(f"Placing swing trade for {stock_symbol}")
+        if predicted_outcome == 1:
             swing_trade_stock(stock_symbol, qty)
         else:
             print(f"Skipping swing trade for {stock_symbol} due to predicted negative return.")
 
-# Function to check exit conditions (sell the stock)
+# Check exit conditions for open trades
 def check_exit_conditions(stock_symbol):
-    global open_positions
     try:
-        stock_info = get_stock_info(stock_symbol)  # Fetch stock data
+        if stock_symbol not in open_positions:
+            return
+
+        stock_info = get_stock_info(stock_symbol)
         current_price = stock_info['price']
-
-        # Example logic: If stock price rises 10% from the purchase price, sell
-        purchase_price = open_positions[stock_symbol]  # Assuming the purchase price is stored here
+        purchase_price = open_positions[stock_symbol]
         if current_price >= purchase_price * 1.1:
-            print(f"Selling {stock_symbol} as it hit the 10% profit target.")
             sell_stock(stock_symbol)
-
     except Exception as e:
         print(f"Error checking exit conditions for {stock_symbol}: {e}")
 
-# Function to sell the stock
+# Sell stock when exit conditions are met
 def sell_stock(stock_symbol):
-    global open_positions
     try:
-        qty = open_positions[stock_symbol]  # Get the quantity to sell
+        qty = open_positions[stock_symbol]
         order_data = MarketOrderRequest(
             symbol=stock_symbol,
             qty=qty,
@@ -179,15 +134,6 @@ def sell_stock(stock_symbol):
         )
         trading_client.submit_order(order_data)
         print(f"Sold {qty} shares of {stock_symbol}")
-        del open_positions[stock_symbol]  # Remove from open positions after selling
+        del open_positions[stock_symbol]
     except Exception as e:
         print(f"Error selling {stock_symbol}: {e}")
-
-# Utility function to fetch stock volatility
-def get_stock_volatility(stock_symbol):
-    stock_data = yf.download(stock_symbol, period="1mo", interval="1d")
-    if stock_data.empty:
-        return None
-    close_prices = stock_data['Close'].values
-    volatility = close_prices.std()
-    return volatility
