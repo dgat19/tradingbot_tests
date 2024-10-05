@@ -1,4 +1,4 @@
-#!/Users/dylangatlin/Library/CloudStorage/OneDrive-Personal/Areas/Documents/GitHub/tradingbot_tests/.venv/bin/python3.12
+#!/Users/dylangatlin/Documents/tradingbot_tests/.venv/bin/python3
 
 import datetime
 import os
