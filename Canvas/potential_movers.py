@@ -32,7 +32,7 @@ class PotentialMovers:
             top_movers = self.get_top_movers()
             for symbol in top_movers:
                 # Fetch market data for each symbol
-                market_data = self.api.get_barset(symbol, 'day', limit=5)[symbol]
+                market_data = self.api.get_bars(symbol, 'day', limit=5)[symbol]
                 
                 if len(market_data) < 5:
                     continue
@@ -58,7 +58,7 @@ class PotentialMovers:
         try:
             top_movers = self.get_top_movers()
             for symbol in top_movers:
-                market_data = self.api.get_barset(symbol, 'day', start=start_date.isoformat(), end=end_date.isoformat(), limit=1000)[symbol]
+                market_data = self.api.get_bars(symbol, 'day', start=start_date.isoformat(), end=end_date.isoformat(), limit=1000)[symbol]
                 
                 if len(market_data) < 5:
                     continue

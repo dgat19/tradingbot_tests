@@ -1,10 +1,8 @@
-import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
 from sklearn.neural_network import MLPRegressor
-from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, r2_score
 import joblib
 import alpaca_trade_api as tradeapi
@@ -57,7 +55,7 @@ class PerformanceTracker:
     def get_current_price(self, symbol):
         # Fetch current price using Alpaca API
         try:
-            barset = self.api.get_barset(symbol, 'minute', limit=1)
+            barset = self.api.get_bars(symbol, 'minute', limit=1)
             current_price = barset[symbol][0].c
             return current_price
         except Exception as e:

@@ -1,5 +1,4 @@
 import alpaca_trade_api as tradeapi
-import requests
 import numpy as np
 
 class SwingTrader:
@@ -14,7 +13,7 @@ class SwingTrader:
             assets = self.api.list_assets(status='active', asset_class='us_equity')
             for asset in assets:
                 symbol = asset.symbol
-                market_data = self.api.get_barset(symbol, 'day', limit=20)[symbol]
+                market_data = self.api.get_bars(symbol, 'day', limit=20)[symbol]
                 
                 if len(market_data) < 20:
                     continue
@@ -48,7 +47,7 @@ class SwingTrader:
             assets = self.api.list_assets(status='active', asset_class='us_equity')
             for asset in assets:
                 symbol = asset.symbol
-                market_data = self.api.get_barset(symbol, 'day', start=start_date.isoformat(), end=end_date.isoformat(), limit=1000)[symbol]
+                market_data = self.api.get_bars(symbol, 'day', start=start_date.isoformat(), end=end_date.isoformat(), limit=1000)[symbol]
                 
                 if len(market_data) < 20:
                     continue

@@ -11,14 +11,14 @@ class OptionsTrader:
         trades = []
         try:
             # Fetch market volatility data (e.g., VIX)
-            vix_data = requests.get('https://api.example.com/vix').json()
+            vix_data = requests.get('https://fred.stlouisfed.org/series/VIXCLS').json()
             market_volatility = vix_data['vix_value']
             
             # Fetch options data from Alpaca
             assets = self.api.list_assets(status='active', asset_class='us_equity')
             for asset in assets:
                 symbol = asset.symbol
-                market_data = self.api.get_barset(symbol, 'day', limit=5)[symbol]
+                market_data = self.api.get_bars(symbol, 'day', limit=5)[symbol]
                 
                 if len(market_data) < 5:
                     continue
@@ -56,7 +56,7 @@ class OptionsTrader:
             assets = self.api.list_assets(status='active', asset_class='us_equity')
             for asset in assets:
                 symbol = asset.symbol
-                market_data = self.api.get_barset(symbol, 'day', start=start_date.isoformat(), end=end_date.isoformat(), limit=1000)[symbol]
+                market_data = self.api.get_bars(symbol, 'day', start=start_date.isoformat(), end=end_date.isoformat(), limit=1000)[symbol]
                 
                 if len(market_data) < 5:
                     continue

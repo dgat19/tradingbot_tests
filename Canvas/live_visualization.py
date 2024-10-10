@@ -24,7 +24,11 @@ def live_strategy_visualization(trade_history):
         ax.set_xlabel("Trade Index")
         ax.set_ylabel("Return")
         ax.legend()
+        plt.tight_layout()
 
     ani = animation.FuncAnimation(fig, update, frames=len(trades_df), repeat=False, interval=1000)
-    plt.tight_layout()
     plt.show()
+
+    # Example usage:
+trade_history = [{'return': 0.02}, {'return': 0.03}, {'return': 0.01}, {'return': 0.05}, {'return': -0.01}]
+live_strategy_visualization(trade_history)
