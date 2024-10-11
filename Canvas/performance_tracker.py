@@ -1,9 +1,9 @@
+import os
 import pandas as pd
+import xgboost as xgb
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
-from sklearn.neural_network import MLPRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 import joblib
 import alpaca_trade_api as tradeapi
 
@@ -12,11 +12,15 @@ class PerformanceTracker:
         self.trade_history = []
         self.model = None
         self.scaler = StandardScaler()
-        self.api = tradeapi.REST('PKV1PSBFZJSVP0SVHZ7U', 'vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il', 'https://paper-api.alpaca.markets')  # Initialize Alpaca API
+        self.api = tradeapi.REST(
+            os.getenv('PKV1PSBFZJSVP0SVHZ7U'),
+            os.getenv('vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il'),
+            'https://paper-api.alpaca.markets'
+        )
         self.load_model()
         # Optimized trading parameters
-        self.trailing_stop_loss = 0.10  # Reduced trailing stop loss to lock in profits sooner
-        self.take_profit_threshold = 0.25  # Reduced take profit threshold to secure gains earlier
+        self.trailing_stop_loss = 0.05  # Adjusted for tighter risk management
+        self.take_profit_threshold = 0.15  # Adjusted to secure gains earlier
 
     def evaluate_trades(self, trades):
         for trade in trades:
@@ -28,10 +32,12 @@ class PerformanceTracker:
             self.trade_history.append(trade)
 
     def should_exit_trade(self, trade):
-        # Optimized exit strategy: Consider both unrealized gains and trailing stop loss
-        current_gain = trade['unrealized_gain']
+        # Optimized exit strategy
         entry_price = trade['entry_price']
         current_price = self.get_current_price(trade['symbol'])
+
+        if current_price is None:
+            return False
 
         # Calculate percentage change
         price_change = (current_price - entry_price) / entry_price
@@ -45,7 +51,7 @@ class PerformanceTracker:
         return False
 
     def exit_trade(self, trade):
-        # Implement exit logic (e.g., using Alpaca API to close positions)
+        # Implement exit logic
         try:
             self.api.close_position(trade['symbol'])
             print(f"Exiting trade for {trade['symbol']} at current price.")
@@ -55,15 +61,15 @@ class PerformanceTracker:
     def get_current_price(self, symbol):
         # Fetch current price using Alpaca API
         try:
-            barset = self.api.get_bars(symbol, 'minute', limit=1)
-            current_price = barset[symbol][0].c
+            barset = self.api.get_latest_bar(symbol)
+            current_price = barset.c
             return current_price
         except Exception as e:
             print(f"Error fetching current price for {symbol}: {e}")
             return None
 
     def learn_from_past_trades(self):
-        if len(self.trade_history) < 10:  # Ensure enough data for training
+        if len(self.trade_history) < 10:
             return
 
         # Prepare data for machine learning
@@ -71,51 +77,38 @@ class PerformanceTracker:
         features = data[['entry_price', 'volatility', 'volume', 'news_sentiment', 'delta', 'theta', 'gamma']]
         labels = data['return']
 
+        # Include additional features
+        features['risk_reward_ratio'] = data['return'] / self.trailing_stop_loss
+
         # Scale the features
         features_scaled = self.scaler.fit_transform(features)
 
         # Train/test split
         X_train, X_test, y_train, y_test = train_test_split(features_scaled, labels, test_size=0.2, random_state=42)
 
-        # Hyperparameter optimization using GridSearchCV for RandomForestRegressor
-        param_grid_rf = {
-            'n_estimators': [100, 150, 200],
-            'max_depth': [10, 15, 20],
-            'min_samples_split': [2, 5, 10],
-            'min_samples_leaf': [1, 2, 4]
+        # Hyperparameter optimization using GridSearchCV for XGBoost
+        param_grid_xgb = {
+            'n_estimators': [100, 200],
+            'max_depth': [3, 5],
+            'learning_rate': [0.01, 0.1],
+            'subsample': [0.8, 1.0]
         }
-        rf = RandomForestRegressor(random_state=42)
-        grid_search_rf = GridSearchCV(estimator=rf, param_grid=param_grid_rf, cv=3, n_jobs=-1, verbose=2)
-        grid_search_rf.fit(X_train, y_train)
-        self.model = grid_search_rf.best_estimator_
+        xg_reg = xgb.XGBRegressor(objective='reg:squarederror', random_state=42)
+        grid_search_xgb = GridSearchCV(estimator=xg_reg, param_grid=param_grid_xgb, cv=3, n_jobs=-1, verbose=2)
+        grid_search_xgb.fit(X_train, y_train)
+        self.model = grid_search_xgb.best_estimator_
 
-        # Hyperparameter optimization using GridSearchCV for MLPRegressor
-        param_grid_mlp = {
-            'hidden_layer_sizes': [(50, 50), (100, 50), (100, 100)],
-            'max_iter': [1000, 2000],
-            'alpha': [0.0001, 0.001, 0.01],
-            'learning_rate': ['constant', 'adaptive']
-        }
-        mlp = MLPRegressor(random_state=42)
-        grid_search_mlp = GridSearchCV(estimator=mlp, param_grid=param_grid_mlp, cv=3, n_jobs=-1, verbose=2)
-        grid_search_mlp.fit(X_train, y_train)
-        best_mlp_model = grid_search_mlp.best_estimator_
+        # Evaluate model accuracy
+        xgb_predictions = self.model.predict(X_test)
+        mse = mean_squared_error(y_test, xgb_predictions)
+        mae = mean_absolute_error(y_test, xgb_predictions)
+        r2 = r2_score(y_test, xgb_predictions)
+        adj_r2 = 1 - (1 - r2) * (len(y_test) - 1) / (len(y_test) - X_test.shape[1] - 1)
 
-        # Evaluate RandomForest model accuracy
-        rf_predictions = self.model.predict(X_test)
-        rf_mse = mean_squared_error(y_test, rf_predictions)
-        rf_r2 = r2_score(y_test, rf_predictions)
-        print(f"RandomForestRegressor - MSE: {rf_mse}, R2 Score: {rf_r2}")
+        print(f"XGBoost Regressor - MSE: {mse}, MAE: {mae}, R2 Score: {r2}, Adjusted R2 Score: {adj_r2}")
 
-        # Evaluate MLP model accuracy
-        mlp_predictions = best_mlp_model.predict(X_test)
-        mlp_mse = mean_squared_error(y_test, mlp_predictions)
-        mlp_r2 = r2_score(y_test, mlp_predictions)
-        print(f"MLPRegressor - MSE: {mlp_mse}, R2 Score: {mlp_r2}")
-
-        # Save the trained models
+        # Save the trained model
         joblib.dump(self.model, 'trade_model.pkl')
-        joblib.dump(best_mlp_model, 'mlp_trade_model.pkl')
         joblib.dump(self.scaler, 'scaler.pkl')
 
     def load_model(self):
@@ -131,6 +124,7 @@ class PerformanceTracker:
 
         # Prepare trade data for prediction
         trade_data = pd.DataFrame([trade])[['entry_price', 'volatility', 'volume', 'news_sentiment', 'delta', 'theta', 'gamma']]
+        trade_data['risk_reward_ratio'] = trade['return'] / self.trailing_stop_loss
         trade_data_scaled = self.scaler.transform(trade_data)
 
         # Predict return

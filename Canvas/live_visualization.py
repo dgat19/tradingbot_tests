@@ -1,3 +1,4 @@
+# live_visualization.py
 import matplotlib.pyplot as plt
 import pandas as pd
 import matplotlib.animation as animation
@@ -26,9 +27,9 @@ def live_strategy_visualization(trade_history):
         ax.legend()
         plt.tight_layout()
 
-    ani = animation.FuncAnimation(fig, update, frames=len(trades_df), repeat=False, interval=1000)
+    ani = animation.FuncAnimation(fig, update, frames=len(trades_df), repeat=False, interval=1000)  # noqa: F841
     plt.show()
 
-    # Example usage:
+# Example usage:
 trade_history = [{'return': 0.02}, {'return': 0.03}, {'return': 0.01}, {'return': 0.05}, {'return': -0.01}]
 live_strategy_visualization(trade_history)

@@ -1,4 +1,3 @@
-import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -8,7 +7,7 @@ class Backtester:
 
     def backtest_strategy(self, strategy):
         # Define backtesting period
-        start_date = datetime.now() - timedelta(days=365)  # 1-year backtest
+        start_date = datetime.now() - timedelta(days=365 * 3)  # 3-year backtest for robustness
         end_date = datetime.now()
 
         # Generate historical data and simulate trading
@@ -30,7 +29,9 @@ class Backtester:
             'Total Return': total_return,
             'Average Return': average_return,
             'Max Drawdown': max_drawdown,
-            'Number of Trades': len(trades)
+            'Number of Trades': len(trades),
+            'Sharpe Ratio': self.calculate_sharpe_ratio(returns),
+            'Sortino Ratio': self.calculate_sortino_ratio(returns)
         }
 
         return performance_summary
@@ -46,3 +47,17 @@ class Backtester:
             if drawdown > max_drawdown:
                 max_drawdown = drawdown
         return max_drawdown
+
+    def calculate_sharpe_ratio(self, returns):
+        mean_return = np.mean(returns)
+        std_return = np.std(returns)
+        risk_free_rate = 0.01  # Assuming 1% annual risk-free rate
+        sharpe_ratio = (mean_return - risk_free_rate) / std_return if std_return != 0 else 0
+        return sharpe_ratio
+
+    def calculate_sortino_ratio(self, returns):
+        mean_return = np.mean(returns)
+        downside_std = np.std([r for r in returns if r < 0])
+        risk_free_rate = 0.01
+        sortino_ratio = (mean_return - risk_free_rate) / downside_std if downside_std != 0 else 0
+        return sortino_ratio
