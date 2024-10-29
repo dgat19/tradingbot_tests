@@ -1,3 +1,4 @@
+# Update for backtester.py
 import numpy as np
 from datetime import datetime, timedelta
 
@@ -13,7 +14,13 @@ class Backtester:
         # Generate historical data and simulate trading
         historical_trades = strategy.backtest(start_date, end_date)
         performance = self.calculate_performance(historical_trades)
-        
+
+        # Evaluate performance under different conditions
+        volatility_conditions = ["low", "medium", "high"]
+        for condition in volatility_conditions:
+            print(f"Evaluating under {condition} volatility conditions...")
+            self.evaluate_under_condition(historical_trades, condition)
+
         print(f"Backtest Performance for {strategy.__class__.__name__}: {performance}")
 
     def calculate_performance(self, trades):
@@ -35,6 +42,21 @@ class Backtester:
         }
 
         return performance_summary
+
+    def evaluate_under_condition(self, trades, condition):
+        filtered_trades = [trade for trade in trades if self.match_condition(trade, condition)]
+        performance = self.calculate_performance(filtered_trades)
+        print(f"Performance under {condition} volatility: {performance}")
+
+    def match_condition(self, trade, condition):
+        # A placeholder method that categorizes trades by volatility or other metrics
+        if condition == "low":
+            return trade['volatility'] < 0.2
+        elif condition == "medium":
+            return 0.2 <= trade['volatility'] < 0.5
+        elif condition == "high":
+            return trade['volatility'] >= 0.5
+        return False
 
     def calculate_max_drawdown(self, returns):
         cumulative_returns = np.cumsum(returns)

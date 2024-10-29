@@ -14,31 +14,43 @@ def main():
     performance_tracker = PerformanceTracker()
     backtester = Backtester()
 
+    # Train PPO model if necessary
+    performance_tracker.train_ppo_model()
+
     # Backtest the trading strategies
     backtester.backtest_strategy(options_trader)
     backtester.backtest_strategy(swing_trader)
     backtester.backtest_strategy(potential_movers)
 
-    # Execute options trading
+    # Execute options trading with PPO filtering
     options_trades = options_trader.execute_strategy()
-    performance_tracker.evaluate_trades(options_trades)
+    options_trades_filtered = [
+        trade for trade in options_trades if performance_tracker.predict_trade_success(trade) > 0.5
+    ]
+    performance_tracker.evaluate_trades(options_trades_filtered)
 
     # Visualize trades and decisions
-    visualization.visualize_trades(options_trades, "Options Trading")
+    visualization.visualize_trades(options_trades_filtered, "Options Trading")
 
-    # Execute swing trading
+    # Execute swing trading with PPO filtering
     swing_trades = swing_trader.execute_strategy()
-    performance_tracker.evaluate_trades(swing_trades)
+    swing_trades_filtered = [
+        trade for trade in swing_trades if performance_tracker.predict_trade_success(trade) > 0.5
+    ]
+    performance_tracker.evaluate_trades(swing_trades_filtered)
 
     # Visualize trades and decisions
-    visualization.visualize_trades(swing_trades, "Swing Trading")
+    visualization.visualize_trades(swing_trades_filtered, "Swing Trading")
 
-    # Execute trades based on top potential movers
+    # Execute trades based on top potential movers with PPO filtering
     movers_trades = potential_movers.execute_strategy()
-    performance_tracker.evaluate_trades(movers_trades)
+    movers_trades_filtered = [
+        trade for trade in movers_trades if performance_tracker.predict_trade_success(trade) > 0.5
+    ]
+    performance_tracker.evaluate_trades(movers_trades_filtered)
 
     # Visualize trades and decisions
-    visualization.visualize_trades(movers_trades, "Potential Movers Trading")
+    visualization.visualize_trades(movers_trades_filtered, "Potential Movers Trading")
 
     # Live visualization of ongoing trades
     live_visualization.live_strategy_visualization(performance_tracker.trade_history)
@@ -48,3 +60,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
