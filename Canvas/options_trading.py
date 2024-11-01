@@ -4,14 +4,17 @@ import requests
 import numpy as np
 from datetime import datetime, timedelta
 import yfinance as yf
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class OptionsTrader:
     def __init__(self):
         # Initialize Alpaca API with secure API key management
         self.api = tradeapi.REST(
-            os.getenv('PKV1PSBFZJSVP0SVHZ7U'),
-            os.getenv('vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il'),
-            'https://paper-api.alpaca.markets'
+            os.getenv('APCA_API_KEY_ID'),
+            os.getenv('APCA_SECRET_KEY'),
+            'https://paper-api.alpaca.markets/v2'
         )
         self.vix_symbol = '^VIX'  # VIX symbol for Yahoo Finance
 

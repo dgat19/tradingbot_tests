@@ -5,14 +5,17 @@ import yfinance as yf
 import requests
 from ta.momentum import RSIIndicator
 from ta.trend import MACD
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class SwingTrader:
     def __init__(self):
         # Initialize Alpaca API
         self.api = tradeapi.REST(
-            os.getenv('PKV1PSBFZJSVP0SVHZ7U'),
-            os.getenv('vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il'),
-            'https://paper-api.alpaca.markets'
+            os.getenv('APCA_API_KEY_ID'),
+            os.getenv('APCA_SECRET_KEY'),
+            'https://paper-api.alpaca.markets/v2'
         )
         
     def execute_strategy(self):

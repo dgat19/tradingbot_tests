@@ -4,18 +4,21 @@ import joblib
 import gym
 import numpy as np
 from stable_baselines3 import PPO
-from stable_baselines3.common.envs import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv
 from sklearn.preprocessing import StandardScaler
 import alpaca_trade_api as tradeapi
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class PerformanceTracker:
     def __init__(self):
         self.trade_history = []
         self.scaler = StandardScaler()
         self.api = tradeapi.REST(
-            os.getenv('PKV1PSBFZJSVP0SVHZ7U'),
-            os.getenv('vnTZhGmchG0xNOGXvJyQIFqSmfkPMYvBIcOcA5Il'),
-            'https://paper-api.alpaca.markets'
+            os.getenv('APCA_API_KEY_ID'),
+            os.getenv('APCA_SECRET_KEY'),
+            'https://paper-api.alpaca.markets/v2'
         )
         self.load_model()
 
@@ -63,6 +66,21 @@ class PerformanceTracker:
         env = DummyVecEnv([lambda: TradingEnv(trade_data_scaled)])
         return self.model.predict(env)[0][0]
 
+    def evaluate_trades(self, trades):
+        for trade in trades:
+            symbol = trade['symbol']
+            try:
+                position = self.api.get_position(symbol)
+                if position:
+                    current_price = float(position.current_price)
+                    entry_price = trade['entry_price']
+                    trade['unrealized_gain'] = (current_price - entry_price) / entry_price
+                else:
+                    trade['unrealized_gain'] = 0  # Default if no position open
+
+                self.trade_history.append(trade)
+            except Exception as e:
+                print(f"Error updating trade for {symbol}: {e}")
 
 class TradingEnv(gym.Env):
     def __init__(self, features, labels=None):
