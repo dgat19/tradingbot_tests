@@ -17,6 +17,19 @@ from matplotlib.figure import Figure
 
 from PySide6 import QtCore, QtWidgets
 
+from reinforcement import EnhancedTradingAgent, EnhancedTradingEnvironment, integrate_rl_agent, check_signals_with_rl
+
+# Initialize RL components
+trading_env = EnhancedTradingEnvironment()
+trading_agent = EnhancedTradingAgent()  # 0: hold, 1: buy, 2: sell
+
+# Try to load existing Q-table
+try:
+    trading_agent.load('trading_qtable.pkl')
+    print("Loaded existing Q-table")
+except:
+    print("Starting with new Q-table")
+
 # ================================
 # Alpaca API Initialization
 # ================================
@@ -298,35 +311,55 @@ def get_confidence_from_di(di_plus: float, di_minus: float) -> float:
 
 def get_filled_price(order_id):
     """
-    Get the actual filled price for an order from Alpaca
+    Get the actual filled price for an order from Alpaca with improved accuracy
     """
     try:
-        # Wait briefly for the order to fill
+        # Initial wait for order to be processed
         time.sleep(2)
-        order = api.get_order(order_id)
+        max_attempts = 20  # Increase wait time to 20 seconds
+        attempt = 0
         
-        # Wait up to 10 seconds for the order to fill
-        wait_count = 0
-        while order.status == 'new' or order.status == 'accepted' or order.status == 'pending_new':
-            time.sleep(1)
+        while attempt < max_attempts:
             order = api.get_order(order_id)
-            wait_count += 1
-            if wait_count >= 10:
-                break
-        
-        if order.status == 'filled':
-            return float(order.filled_avg_price)
-        else:
-            print(f"Order {order_id} not filled after waiting. Status: {order.status}")
-            return None
-    except Exception as e:
-        print(f"Error getting fill price: {e}")
+            
+            if order.status == 'filled':
+                # Get trade details for more accurate fill price
+                trades = api.get_trades(order.client_order_id)
+                if trades:
+                    # Calculate volume-weighted average price from all fills
+                    total_shares = sum(float(trade.qty) for trade in trades)
+                    weighted_price = sum(float(trade.qty) * float(trade.price) for trade in trades)
+                    avg_fill_price = weighted_price / total_shares if total_shares > 0 else float(order.filled_avg_price)
+                    
+                    print(f"Order {order_id} filled - VWAP: {avg_fill_price:.2f}")
+                    return avg_fill_price
+                else:
+                    # Fallback to order's average fill price
+                    fill_price = float(order.filled_avg_price)
+                    print(f"Order {order_id} filled - Average Price: {fill_price:.2f}")
+                    return fill_price
+                    
+            elif order.status in ['canceled', 'expired', 'rejected']:
+                print(f"Order {order_id} {order.status}. No fill price available.")
+                return None
+                
+            attempt += 1
+            time.sleep(1)
+            
+        print(f"Order {order_id} not filled after {max_attempts} seconds. Status: {order.status}")
         return None
+        
+    except Exception as e:
+        print(f"Error getting fill price for order {order_id}: {e}")
+        # Try one more time to get the position's average entry price
+        try:
+            position = api.get_position(order.symbol)
+            return float(position.avg_entry_price)
+        except:
+            return None
 
 def place_bracket_order(ticker, side, qty, entry_price, time_index):
-    """
-    Modified to use actual fill price instead of estimated entry price
-    """
+    """Modified to handle extended hours trading with limit orders"""
     global trades
     try:
         q = float(qty)
@@ -346,6 +379,7 @@ def place_bracket_order(ticker, side, qty, entry_price, time_index):
         
     try:
         if is_market_open_local():
+            # Regular market hours - use market orders
             order = api.submit_order(
                 symbol=ticker,
                 qty=qty,
@@ -356,46 +390,41 @@ def place_bracket_order(ticker, side, qty, entry_price, time_index):
                 take_profit={'limit_price': take_profit_price},
                 stop_loss={'stop_price': stop_loss_price}
             )
-            # Get actual fill price
-            filled_price = get_filled_price(order.id)
-            if filled_price:
-                print(f"Placed {side} BRACKET order for {ticker} | Qty: {qty} | Filled at: {filled_price:.2f} "
-                      f"| TP: {take_profit_price} | SL: {stop_loss_price}")
-                trades.append({
-                    'ticker': ticker,
-                    'side': side,
-                    'time': time_index,
-                    'price': filled_price  # Use actual fill price
-                })
-            else:
-                print(f"Warning: Could not get fill price for {ticker} order")
         else:
+            # Extended hours - use limit orders
+            # Add small buffer to ensure order fills
+            limit_price = entry_price * 1.01 if side == 'buy' else entry_price * 0.99
+            limit_price = round(limit_price, 2)
+            
             order = api.submit_order(
                 symbol=ticker,
                 qty=qty,
                 side=side,
-                type='market',
+                type='limit',
                 time_in_force='day',
+                limit_price=limit_price,
                 extended_hours=True
             )
-            filled_price = get_filled_price(order.id)
-            if filled_price:
-                print(f"Placed {side} EXTENDED-HOURS order for {ticker} | Qty: {qty} | Filled at: {filled_price:.2f}")
-                trades.append({
-                    'ticker': ticker,
-                    'side': side,
-                    'time': time_index,
-                    'price': filled_price  # Use actual fill price
-                })
-            else:
-                print(f"Warning: Could not get fill price for {ticker} order")
+            print(f"Placed {side} EXTENDED-HOURS LIMIT order for {ticker} | Qty: {qty} | Limit: {limit_price:.2f}")
+            
+        # Get actual fill price
+        filled_price = get_filled_price(order.id)
+        if filled_price:
+            print(f"Order filled at: {filled_price:.2f}")
+            trades.append({
+                'ticker': ticker,
+                'side': side,
+                'time': time_index,
+                'price': filled_price
+            })
+        else:
+            print(f"Warning: Could not get fill price for {ticker} order")
+            
     except Exception as e:
         print(f"Order error for {ticker}: {e}")
 
 def place_simple_order(ticker, side, qty, entry_price, time_index):
-    """
-    Modified to use actual fill price instead of estimated entry price
-    """
+    """Modified to handle extended hours trading with limit orders"""
     global trades
     try:
         if is_market_open_local():
@@ -406,44 +435,39 @@ def place_simple_order(ticker, side, qty, entry_price, time_index):
                 type='market',
                 time_in_force='day'
             )
-            filled_price = get_filled_price(order.id)
-            if filled_price:
-                print(f"Placed SIMPLE {side} order for {ticker} (REGULAR hours) | Qty: {qty} | Filled at: {filled_price:.2f}")
-                trades.append({
-                    'ticker': ticker,
-                    'side': side,
-                    'time': time_index,
-                    'price': filled_price  # Use actual fill price
-                })
-            else:
-                print(f"Warning: Could not get fill price for {ticker} order")
         else:
+            # Extended hours - use limit orders with buffer
+            limit_price = entry_price * 1.01 if side == 'buy' else entry_price * 0.99
+            limit_price = round(limit_price, 2)
+            
             order = api.submit_order(
                 symbol=ticker,
                 qty=str(qty),
                 side=side,
-                type='market',
+                type='limit',
                 time_in_force='day',
+                limit_price=limit_price,
                 extended_hours=True
             )
-            filled_price = get_filled_price(order.id)
-            if filled_price:
-                print(f"Placed SIMPLE {side} order for {ticker} (EXTENDED hours) | Qty: {qty} | Filled at: {filled_price:.2f}")
-                trades.append({
-                    'ticker': ticker,
-                    'side': side,
-                    'time': time_index,
-                    'price': filled_price  # Use actual fill price
-                })
-            else:
-                print(f"Warning: Could not get fill price for {ticker} order")
+            print(f"Placed SIMPLE {side} LIMIT order for {ticker} (EXTENDED hours) | Qty: {qty} | Limit: {limit_price:.2f}")
+            
+        filled_price = get_filled_price(order.id)
+        if filled_price:
+            print(f"Order filled at: {filled_price:.2f}")
+            trades.append({
+                'ticker': ticker,
+                'side': side,
+                'time': time_index,
+                'price': filled_price
+            })
+        else:
+            print(f"Warning: Could not get fill price for {ticker} order")
+            
     except Exception as e:
         print(f"Simple order error for {ticker}: {e}")
 
 def place_market_sell(ticker, sell_qty, sell_price, time_index):
-    """
-    Modified to use actual fill price instead of estimated entry price
-    """
+    """Modified to handle extended hours trading with limit orders"""
     global trades
     try:
         current_qty = get_position_qty(ticker)
@@ -464,53 +488,58 @@ def place_market_sell(ticker, sell_qty, sell_price, time_index):
                 type='market',
                 time_in_force='day'
             )
-            filled_price = get_filled_price(order.id)
-            if filled_price:
-                print(f"{ticker}: Market sell filled (REGULAR hours) to close {sell_qty_str} shares at {filled_price:.2f}")
-                trades.append({
-                    'ticker': ticker,
-                    'side': 'sell',
-                    'time': time_index,
-                    'price': filled_price,  # Use actual fill price
-                    'quantity': sell_qty_str
-                })
-            else:
-                print(f"Warning: Could not get fill price for {ticker} sell order")
         else:
+            # Extended hours - use limit orders with small discount to ensure fill
+            limit_price = sell_price * 0.99  # 1% below current price
+            limit_price = round(limit_price, 2)
+            
             order = api.submit_order(
                 symbol=ticker,
                 qty=sell_qty_str,
                 side='sell',
-                type='market',
+                type='limit',
                 time_in_force='day',
+                limit_price=limit_price,
                 extended_hours=True
             )
-            filled_price = get_filled_price(order.id)
-            if filled_price:
-                print(f"{ticker}: Market sell filled (EXTENDED hours) to close {sell_qty_str} shares at {filled_price:.2f}")
-                trades.append({
-                    'ticker': ticker,
-                    'side': 'sell',
-                    'time': time_index,
-                    'price': filled_price,  # Use actual fill price
-                    'quantity': sell_qty_str
-                })
-            else:
-                print(f"Warning: Could not get fill price for {ticker} sell order")
+            print(f"{ticker}: Extended hours LIMIT sell order placed - Qty: {sell_qty_str} | Limit: {limit_price:.2f}")
+            
+        filled_price = get_filled_price(order.id)
+        if filled_price:
+            print(f"Order filled at: {filled_price:.2f}")
+            trades.append({
+                'ticker': ticker,
+                'side': 'sell',
+                'time': time_index,
+                'price': filled_price,
+                'quantity': sell_qty_str
+            })
+        else:
+            print(f"Warning: Could not get fill price for {ticker} sell order")
+            
     except Exception as e:
         print(f"Error closing position for {ticker}: {e}")
+
+# Helper function to check if stock is eligible for extended hours trading
+def is_extended_hours_eligible(ticker):
+    """Check if a stock is eligible for extended hours trading"""
+    try:
+        asset = api.get_asset(ticker)
+        return asset.tradable and asset.easy_to_borrow and asset.marginable
+    except Exception as e:
+        print(f"Error checking extended hours eligibility for {ticker}: {e}")
+        return False
 
 # ================================
 # Trading Logic
 # ================================
-def run_trading():
-    """
-    Use confidence-based sizing: if confidence=1, buy up to 10% of the 50% allocation; 
-    if 0.4, buy 4% of the 50% allocation.
-    Now, orders are fractional.
-    """
+def run_trading_with_rl():
+    """Enhanced trading function with RL integration"""
+    global trading_agent, trading_env
+    
     account_cash = display_account_info()
     tickers = ['NVDA', 'AAPL', 'MSFT', 'META', 'TSLA', 'PLTR', 'GOOG']
+    
     for ticker in tickers:
         print(f"\nProcessing ticker: {ticker}")
         try:
@@ -518,49 +547,83 @@ def run_trading():
             if intraday_df is None or intraday_df.empty:
                 print("No intraday data.")
                 continue
+                
             intraday_df = calculate_indicators(intraday_df, len_period=14)
             display_ticker_info(ticker, intraday_df)
-            print(f"  Historical DI+ for {ticker}: {intraday_df['DI+'].tail(5).tolist()}")
-            print(f"  Historical DI- for {ticker}: {intraday_df['DI-'].tail(5).tolist()}")
             
-            # Only change: pass ticker to check_signals
-            signal = check_signals(intraday_df, ticker)
+            # Train agent with enhanced features
+            trading_agent = integrate_rl_agent(intraday_df, ticker, trading_agent, trading_env)
+            
+            # Get signal using enhanced RL agent
+            signal = check_signals_with_rl(intraday_df, ticker, trading_agent, trading_env)
             
             if not signal:
                 print(f"{ticker}: No signal generated.")
                 continue
+                
+            # Execute trades with standard logic
             last_bar = intraday_df.iloc[-1]
             di_plus = last_bar['DI+']
             di_minus = last_bar['DI-']
             confidence = get_confidence_from_di(di_plus, di_minus)
-            print(f"{ticker} Confidence from DI: {confidence:.2f}")
             current_price = last_bar['close']
             current_position = get_position_qty(ticker)
+            
             if signal == 'buy':
                 if current_position > 0:
                     print(f"{ticker}: Already in position.")
                     continue
-                max_allocation = account_cash * 0.5  # 50% of account cash
-                fraction_of_allocation = 0.1 * confidence  # Scale from 0% to 10% of that allocation
+                    
+                # Get market features for position sizing
+                market_features = trading_env.calculate_market_features(intraday_df)
+                volatility_factor = max(0.5, min(1.0, 2.0 / (market_features.get('volatility', 1.0))))
+                
+                # Adjust position size based on volatility
+                max_allocation = account_cash * 0.5 * volatility_factor
+                fraction_of_allocation = 0.1 * confidence
                 buy_dollars = max_allocation * fraction_of_allocation
-                qty = buy_dollars / current_price  # Fractional shares allowed
+                qty = buy_dollars / current_price
                 qty = round(qty, 3)
+                
                 if qty < 0.001:
-                    print(f"{ticker}: Confidence is {confidence:.2f}, but not enough funds to buy a fractional share.")
+                    print(f"{ticker}: Position size too small after volatility adjustment.")
                     continue
-                # If qty is fractional (not an integer), we use a simple order
+                    
+                # Place order with actual fill price tracking
                 if qty != int(qty):
                     place_simple_order(ticker, 'buy', qty, current_price, intraday_df.index[-1])
                 else:
                     place_bracket_order(ticker, 'buy', qty, current_price, intraday_df.index[-1])
+                    
             elif signal == 'sell':
                 if current_position <= 0:
                     print(f"{ticker}: No position to sell.")
                     continue
+                    
+                # Check if it's a stop loss or profit taking
+                if trading_env.position_entry_price:
+                    pl_pct = ((current_price - trading_env.position_entry_price) / 
+                             trading_env.position_entry_price) * 100
+                    if pl_pct < -2.0:  # Stop loss
+                        print(f"{ticker}: Stop loss triggered at {pl_pct:.2f}%")
+                    elif pl_pct > 0:  # Profit taking
+                        print(f"{ticker}: Taking profit at {pl_pct:.2f}%")
+                
                 place_market_sell(ticker, current_position, current_price, intraday_df.index[-1])
+                
         except Exception as e:
             print(f"Error processing {ticker}: {e}")
         time.sleep(10)
+        
+    # Save Q-table and analyze performance
+    try:
+        trading_agent.save('trading_qtable.pkl')
+        print("\nSaved Q-table successfully")
+    except Exception as e:
+        print(f"\nError saving Q-table: {e}")
+    
+    # Update performance metrics
+    performance_monitor.update_performance(trading_env)
 
 # ================================
 # Plotting GUI with Tabs and Auto-Refresh
@@ -760,23 +823,174 @@ class MainWindow(QtWidgets.QMainWindow):
             if ticker != current_ticker:
                 plot_di_for_ticker(ticker, canvas)
 
+class PerfomancePlotWindow(QtWidgets.QMainWindow):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Trade Performance Distribution")
+        self.setGeometry(300, 200, 800, 600)
+        
+        # Create main widget and layout
+        main_widget = QtWidgets.QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QtWidgets.QVBoxLayout(main_widget)
+        
+        # Create matplotlib figure and canvas
+        self.fig = Figure(figsize=(8, 6), dpi=100)
+        self.canvas = FigureCanvasQTAgg(self.fig)
+        layout.addWidget(self.canvas)
+        
+        # Create refresh button
+        self.refresh_button = QtWidgets.QPushButton("Refresh")
+        self.refresh_button.clicked.connect(self.refresh_plot)
+        layout.addWidget(self.refresh_button)
+        
+        # Store latest profits data
+        self.profits = []
+        
+    def update_data(self, profits):
+        """Update data and refresh plot"""
+        self.profits = profits.copy()  # Make a copy to avoid thread issues
+        self.refresh_plot()
+        
+    def refresh_plot(self):
+        """Refresh the plot with current data"""
+        if not self.profits:
+            return
+            
+        self.fig.clear()
+        ax = self.fig.add_subplot(111)
+        
+        # Plot histogram
+        n, bins, patches = ax.hist(self.profits, bins=30, color='blue', alpha=0.7)
+        
+        # Calculate statistics
+        mean_profit = np.mean(self.profits)
+        std_profit = np.std(self.profits)
+        median_profit = np.median(self.profits)
+        
+        # Add vertical lines for statistics
+        ax.axvline(mean_profit, color='green', linestyle='--', label=f'Mean: {mean_profit:.2f}%')
+        ax.axvline(mean_profit + std_profit, color='red', linestyle=':', label=f'+1 Std: {(mean_profit + std_profit):.2f}%')
+        ax.axvline(mean_profit - std_profit, color='red', linestyle=':', label=f'-1 Std: {(mean_profit - std_profit):.2f}%')
+        ax.axvline(median_profit, color='yellow', linestyle='-', label=f'Median: {median_profit:.2f}%')
+        
+        # Add statistics text box
+        stats_text = (f'Total Trades: {len(self.profits)}\n'
+                     f'Mean: {mean_profit:.2f}%\n'
+                     f'Median: {median_profit:.2f}%\n'
+                     f'Std Dev: {std_profit:.2f}%\n'
+                     f'Min: {min(self.profits):.2f}%\n'
+                     f'Max: {max(self.profits):.2f}%')
+        
+        ax.text(0.95, 0.95, stats_text,
+                transform=ax.transAxes,
+                verticalalignment='top',
+                horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        # Customize plot
+        ax.set_title('Trade Profit Distribution', pad=20)
+        ax.set_xlabel('Profit %')
+        ax.set_ylabel('Frequency')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        
+        # Adjust layout and redraw
+        self.fig.tight_layout()
+        self.canvas.draw()
+
+class PerformanceMonitor(QtCore.QObject):
+    """Thread-safe performance monitor"""
+    update_signal = QtCore.Signal(list)  # Signal for updating plot data
+    
+    def __init__(self):
+        super().__init__()
+        self.plot_window = None
+        self.update_signal.connect(self._update_plot_window)
+    
+    @QtCore.Slot(list)
+    def _update_plot_window(self, profits):
+        """Update plot window from main thread"""
+        if self.plot_window is None:
+            self.plot_window = PerfomancePlotWindow()
+            self.plot_window.show()
+        self.plot_window.update_data(profits)
+    
+    def update_performance(self, env):
+        """Update and display performance metrics"""
+        trades = env.trade_history
+        if not trades:
+            print("\nNo trades to analyze")
+            return
+            
+        profits = [trade['pl_pct'] for trade in trades]
+        win_rate = len([p for p in profits if p > 0]) / len(profits)
+        avg_profit = np.mean(profits)
+        sharpe = np.mean(profits) / np.std(profits) if len(profits) > 1 else 0
+        
+        # Print performance metrics
+        print("\nRL Trading Performance:")
+        print(f"Number of trades: {len(trades)}")
+        print(f"Win rate: {win_rate:.2%}")
+        print(f"Average profit per trade: {avg_profit:.2%}")
+        print(f"Sharpe ratio: {sharpe:.2f}")
+        
+        # Emit signal to update plot if enough trades
+        if len(profits) > 5:
+            self.update_signal.emit(profits)
+        else:
+            print("Not enough trades for distribution plot")
+
+def analyze_rl_performance(env):
+    """Analyze the performance of the RL trading strategy"""
+    trades = env.trade_history
+    if not trades:
+        print("\nNo trades to analyze")
+        return
+        
+    profits = [trade['pl_pct'] for trade in trades]
+    win_rate = len([p for p in profits if p > 0]) / len(profits)
+    avg_profit = np.mean(profits)
+    sharpe = np.mean(profits) / np.std(profits) if len(profits) > 1 else 0
+    
+    print("\nRL Trading Performance:")
+    print(f"Number of trades: {len(trades)}")
+    print(f"Win rate: {win_rate:.2%}")
+    print(f"Average profit per trade: {avg_profit:.2%}")
+    print(f"Sharpe ratio: {sharpe:.2f}")
+    
+    # Let the PerformanceMonitor handle the plotting
+    performance_monitor.update_performance(env)
+
 # ================================
 # Trading Loop
 # ================================
 def trading_loop():
+    """Enhanced trading loop with RL integration"""
     while True:
-        print("\n----- Starting a new trading cycle -----")
-        run_trading()
+        print("\n----- Starting new trading cycle with RL -----")
+        run_trading_with_rl()
         print("----- Trading cycle complete. Sleeping 60 seconds. -----\n")
         time.sleep(60)
+
+performance_monitor = PerformanceMonitor()
 
 # ================================
 # Main Execution
 # ================================
 if __name__ == '__main__':
-    trading_thread = threading.Thread(target=trading_loop, daemon=True)
-    trading_thread.start()
+    # At the start of your program, after creating QApplication
     app = QtWidgets.QApplication(sys.argv)
+
+    # Create performance monitor in the main thread
+    performance_monitor = PerformanceMonitor()
+
+    # Create and show main window
     window = MainWindow()
     window.show()
+
+    # Start trading thread
+    trading_thread = threading.Thread(target=trading_loop, daemon=True)
+    trading_thread.start()
+
     sys.exit(app.exec())
