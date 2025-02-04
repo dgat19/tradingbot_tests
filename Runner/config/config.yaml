@@ -1,0 +1,19 @@
+"""store global parameters (e.g., polling intervals, 
+confidence thresholds, RL hyperparameters)."
+
+position_params:
+  max_account_risk: 0.02
+  max_position_risk: 0.01
+  volatility_scaling: true
+  kelly_criterion: true
+
+default_strategy: LONG_CALL
+
+backtest_symbols:
+  - AAPL
+  - MSFT
+  - GOOG
+  - PLTR
+  - NVDA
+  - TSLA
+  - ACHR

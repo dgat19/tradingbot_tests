@@ -1,4 +1,3 @@
-# main.py
 import os
 from dotenv import load_dotenv
 import live_visualization
