@@ -74,33 +74,54 @@ class EnhancedTradingEnvironment:
         return self.current_state
         
     def calculate_market_features(self, df, lookback_window=20):
-        """Calculate market features with momentum indicators"""
+        """Enhanced market features with better risk/reward detection"""
         if len(df) < lookback_window:
             return {}
-            
+                
         current_price = df['close'].iloc[-1]
         lookback_prices = df['close'].tail(lookback_window)
-        typical_prices = (df['high'] + df['low'] + df['close']) / 3
         
-        # Basic features
+        # Calculate advanced momentum features
+        momentum_periods = [5, 10, 20]
+        momentum_features = {}
+        for period in momentum_periods:
+            if len(df) > period:
+                momentum_features[f'momentum_{period}'] = (
+                    df['close'].iloc[-1] / df['close'].iloc[-period] - 1) * 100
+        
+        # Advanced volatility analysis
+        returns = df['close'].pct_change()
+        volatility = returns.std() * np.sqrt(252)  # Annualized volatility
+        
+        # Volume analysis
+        volume_sma = df['volume'].rolling(window=lookback_window).mean()
+        volume_ratio = df['volume'].iloc[-1] / volume_sma.iloc[-1] if not volume_sma.empty else 1
+        
+        # Price channel analysis
+        upper_channel = df['high'].rolling(lookback_window).max()
+        lower_channel = df['low'].rolling(lookback_window).min()
+        channel_position = (current_price - lower_channel.iloc[-1]) / (upper_channel.iloc[-1] - lower_channel.iloc[-1])
+        
+        # Trend strength
+        di_strength = abs(df['DI+'].iloc[-1] - df['DI-'].iloc[-1])
+        
         features = {
             'trend': (current_price - lookback_prices.mean()) / lookback_prices.mean() * 100,
-            'volatility': lookback_prices.pct_change().std() * 100,
-            'momentum': (current_price / lookback_prices.iloc[0] - 1) * 100,
-            'price_range': (df['high'].tail(lookback_window).max() - 
-                          df['low'].tail(lookback_window).min()) / current_price * 100,
+            'volatility': volatility * 100,
+            'momentum': momentum_features,
+            'volume_ratio': volume_ratio,
+            'channel_position': channel_position,
+            'di_strength': di_strength,
+            'price_range': (upper_channel.iloc[-1] - lower_channel.iloc[-1]) / current_price * 100,
         }
         
-        # Add RSI
-        delta = df['close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        features['rsi'] = 100 - (100 / (1 + rs.iloc[-1]))
-        
-        # Add volume analysis
-        features['volume_trend'] = (df['volume'].tail(5).mean() / 
-                                  df['volume'].tail(20).mean() - 1) * 100
+        # Add risk score (0-1, higher means riskier)
+        features['risk_score'] = min(1.0, (
+            (volatility / 0.4) +  # Normalize by typical volatility
+            abs(features['trend']) / 20 +  # Trend extremity
+            (volume_ratio - 1) / 2 +  # Volume spike
+            abs(channel_position - 0.5) * 2  # Position in channel
+        ) / 4)
         
         return features
         
@@ -188,27 +209,24 @@ class EnhancedTradingEnvironment:
             
         return reward, done
         
-    def _calculate_dynamic_reward(self, pl_pct):
-        """Calculate reward based on profit and market conditions"""
+    def _calculate_dynamic_reward(self, pl_pct, risk_score):
+        """Enhanced reward calculation with better risk adjustment"""
         if pl_pct > 0:
-            reward = np.exp(pl_pct/10) - 1  # Exponential reward for profits
+            # Exponential reward scaled by risk
+            base_reward = np.exp(pl_pct/5) - 1  # More aggressive scaling
             
-            # Bonus for selling in favorable conditions
-            if self.market_features.get('rsi', 50) > 70:
-                reward *= 1.2  # Overbought bonus
-            if self.market_features.get('volume_trend', 0) > 20:
-                reward *= 1.1  # High volume bonus
+            # Adjust reward based on risk taken
+            risk_adjusted_reward = base_reward * (1 - risk_score)
+            
+            # Additional rewards for managing risk well
+            if risk_score < 0.3 and pl_pct > 1.0:
+                risk_adjusted_reward *= 1.5  # Bonus for low-risk wins
                 
+            return risk_adjusted_reward
         else:
-            reward = pl_pct  # Linear penalty for losses
-            
-            # Reduce penalty in poor market conditions
-            if self.market_features.get('trend', 0) < -2:
-                reward *= 0.8
-            if self.market_features.get('volatility', 0) > 20:
-                reward *= 0.9
-                
-        return reward
+            # Penalize losses more heavily in high-risk situations
+            risk_multiplier = 1 + risk_score
+            return pl_pct * risk_multiplier
         
     def _manage_position_limits(self, current_price, df):
         """Dynamically manage position limits based on market conditions"""
@@ -481,20 +499,77 @@ def integrate_rl_agent(intraday_df, ticker, agent, env):
     return agent
 
 def check_signals_with_rl(df, ticker, agent, env):
-    """Enhanced signal checking using RL agent"""
+    """Enhanced signal checking with risk management"""
     if df is None or len(df) < 2:
         return None
     
     # Update environment state
     current_state = env.update_state(df)
     
+    # Get market features
+    market_features = env.calculate_market_features(df)
+    risk_score = market_features.get('risk_score', 0.5)
+    
     # Get action from agent
     action = agent.get_action(current_state)
     
-    # Convert action to signal
+    # Apply risk-based filters
     if action.action_type == 1:  # Buy
+        # Check risk conditions
+        if (risk_score > 0.7 or  # Too risky
+            market_features.get('volatility', 0) > 40 or  # Too volatile
+            market_features.get('volume_ratio', 1) < 0.5):  # Too low volume
+            return None
+            
+        # Check momentum alignment
+        momentum_5 = market_features.get('momentum', {}).get('momentum_5', 0)
+        momentum_20 = market_features.get('momentum', {}).get('momentum_20', 0)
+        if momentum_5 < 0 and momentum_20 < 0:  # Poor momentum
+            return None
+            
         return 'buy'
+        
     elif action.action_type == 2:  # Sell
+        # Get position info for trailing stop
+        position_price = env.position.get('entry_price', 0) if env.position else 0
+        if position_price > 0:
+            current_price = df['close'].iloc[-1]
+            pl_pct = ((current_price - position_price) / position_price) * 100
+            
+            # Dynamic stop loss based on risk
+            stop_loss = -2.0 * (1 + risk_score)  # Higher risk = tighter stop
+            
+            # Dynamic take profit based on volatility
+            volatility = market_features.get('volatility', 20)
+            take_profit = min(5.0, volatility)  # Cap at 5%
+            
+            if pl_pct <= stop_loss or pl_pct >= take_profit:
+                return 'sell'
+                
         return 'sell'
     
     return None
+
+def calculate_position_size(account_cash, current_price, risk_score, confidence):
+    """Calculate position size with enhanced risk management"""
+    # Base position size
+    max_position_pct = 0.5  # Maximum 50% of account
+    
+    # Risk-adjusted position size
+    risk_factor = 1 - risk_score
+    volatility_factor = max(0.3, min(1.0, 1 - risk_score))
+    
+    # Calculate final position size
+    position_pct = max_position_pct * risk_factor * confidence * volatility_factor
+    
+    # Additional safety caps
+    if risk_score > 0.7:
+        position_pct *= 0.5  # Halve position size for high risk
+    if confidence < 0.4:
+        position_pct *= 0.5  # Halve position size for low confidence
+        
+    # Calculate actual position
+    position_dollars = account_cash * position_pct
+    qty = position_dollars / current_price
+    
+    return round(qty, 3)

@@ -1,9 +1,5 @@
 from datetime import datetime, time, timedelta
 import pytz
-import pandas as pd
-import pandas_market_calendars as mcal
-
-nyse = mcal.get_calendar('NYSE')
 
 class MarketHours:
     """Handles market hours checking and scheduling."""
@@ -13,21 +9,20 @@ class MarketHours:
         self.market_open = time(9, 30)  # 9:30 AM EST
         self.market_close = time(16, 30)  # 4:30 PM EST
 
-    def is_market_open_now(self) -> bool:
-        now_utc = pd.Timestamp.utcnow()
-        schedule = nyse.schedule(start_date=now_utc.date(), end_date=now_utc.date())
+    def is_market_open(self) -> bool:
+        """Check if the market is currently open."""
+        # Get current time in EST
+        current_time = datetime.now(self.est_tz)
         
-        # If schedule is empty (e.g., weekend, holiday), clearly market is closed
-        if schedule.empty:
+        # Check if it's a weekday
+        if current_time.weekday() >= 5:  # 5 is Saturday, 6 is Sunday
             return False
+            
+        # Get just the time part
+        current_time = current_time.time()
         
-        # Otherwise, wrap `open_at_time` in a try/except
-        try:
-            return nyse.open_at_time(schedule, now_utc)
-        except ValueError:
-            # The timestamp isn't covered by today's schedule => closed
-            return False
-
+        # Check if within market hours
+        return self.market_open <= current_time <= self.market_close
 
     def time_until_market_open(self) -> float:
         """Calculate seconds until market opens."""

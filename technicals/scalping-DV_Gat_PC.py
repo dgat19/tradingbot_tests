@@ -1,6 +1,5 @@
 import sys
 import os
-from dotenv import load_dotenv
 os.environ["QT_API"] = "PySide6"
 os.environ["APCA_API_DATA_URL"] = "https://data.alpaca.markets"
 
@@ -34,8 +33,8 @@ except:
 # ================================
 # Alpaca API Initialization
 # ================================
-ALPACA_API_KEY = load_dotenv('SCALPING_API_KEY')
-ALPACA_SECRET_KEY = load_dotenv('SCALPING_SECRET_KEY')
+ALPACA_API_KEY = os.getenv('SCALPING_API_KEY')
+ALPACA_SECRET_KEY = os.getenv('SCALPING_SECRET_KEY')
 BASE_URL = 'https://paper-api.alpaca.markets'
 
 api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, base_url=BASE_URL, api_version='v2')
