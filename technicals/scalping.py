@@ -2,7 +2,6 @@ import sys
 import os
 from dotenv import load_dotenv
 os.environ["QT_API"] = "PySide6"
-os.environ["APCA_API_DATA_URL"] = "https://data.alpaca.markets"
 
 import time
 import threading
@@ -20,6 +19,9 @@ from PySide6 import QtCore, QtWidgets
 
 from reinforcement import EnhancedTradingAgent, EnhancedTradingEnvironment, integrate_rl_agent, check_signals_with_rl
 
+# Initialize dotenv credentials
+load_dotenv()
+
 # Initialize RL components
 trading_env = EnhancedTradingEnvironment()
 trading_agent = EnhancedTradingAgent()  # 0: hold, 1: buy, 2: sell
@@ -34,11 +36,28 @@ except:
 # ================================
 # Alpaca API Initialization
 # ================================
-ALPACA_API_KEY = load_dotenv('SCALPING_API_KEY')
-ALPACA_SECRET_KEY = load_dotenv('SCALPING_SECRET_KEY')
-BASE_URL = 'https://paper-api.alpaca.markets'
+ALPACA_API_KEY = os.getenv('APCA_PAPER_API_KEY')
+ALPACA_SECRET_KEY = os.getenv('APCA_PAPER_SECRET_KEY')
+PAPER_BASE_URL = 'https://paper-api.alpaca.markets'  # Paper trading URL
+DATA_BASE_URL = 'https://data.alpaca.markets'  # Market data URL
 
-api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, base_url=BASE_URL, api_version='v2')
+# Initialize API for both trading and data
+api = tradeapi.REST(
+    key_id=ALPACA_API_KEY,
+    secret_key=ALPACA_SECRET_KEY,
+    base_url=PAPER_BASE_URL,  # For paper trading
+    api_version='v2'
+)
+
+# Test the connection
+try:
+    account = api.get_account()
+    print(f"\nSuccessfully connected to Alpaca API")
+    print(f"Account Status: {account.status}")
+    print(f"Cash Balance: ${float(account.cash):.2f}")
+except Exception as e:
+    print(f"Error connecting to Alpaca API: {e}")
+    sys.exit(1)
 
 # ================================
 # Global Trades List
@@ -75,79 +94,104 @@ def is_market_open_local():
 # ================================
 def get_historical_data(ticker, timeframe='1Min', limit=1000):
     """
-    Modified to handle market hours correctly
+    Get intraday 1-minute bar data for today's trading session
     """
     try:
+        # Get current time in Eastern timezone
         eastern = pytz.timezone('US/Eastern')
         now = datetime.datetime.now(eastern)
         
-        # Set market open time for today
-        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        market_close = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        # Set today's market hours
+        today = now.date()
+        market_open = eastern.localize(datetime.datetime.combine(today, datetime.time(9, 30)))
+        market_close = eastern.localize(datetime.datetime.combine(today, datetime.time(16, 0)))
         
-        # If before market open, use previous day
+        # If before market open, use previous trading day
         if now.time() < datetime.time(9, 30):
-            market_open = market_open - datetime.timedelta(days=1)
+            prev_day = market_open - datetime.timedelta(days=1)
+            market_open = prev_day
             market_close = market_close - datetime.timedelta(days=1)
         
-        # If after market close, use today's market hours
+        # If after market close, use today's completed session
         elif now.time() > datetime.time(16, 0):
             now = market_close
-        
-        # Get bars using IEX feed with market hours
+
+        # Request the bars
         bars = api.get_bars(
-            symbol=ticker,
-            timeframe=timeframe,
+            ticker,
+            timeframe,
             start=market_open.isoformat(),
             end=now.isoformat(),
-            adjustment='raw',
-            feed='iex'
+            adjustment='raw'
         )
-        bars = list(bars)
-        
-        if not bars:
-            print(f"No {timeframe} bars returned for {ticker}")
+
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'time': bar.t,
+            'open': bar.o,
+            'high': bar.h,
+            'low': bar.l,
+            'close': bar.c,
+            'volume': bar.v
+        } for bar in bars])
+
+        if df.empty:
+            print(f"No data returned for {ticker}")
             return None
-            
-        data = {
-            'time': [bar.t for bar in bars],
-            'open': [bar.o for bar in bars],
-            'high': [bar.h for bar in bars],
-            'low': [bar.l for bar in bars],
-            'close': [bar.c for bar in bars],
-            'volume': [bar.v for bar in bars]
-        }
-        df = pd.DataFrame(data)
+
+        # Set index to time
         df.set_index('time', inplace=True)
         df.sort_index(inplace=True)
         return df
-        
+
     except Exception as e:
-        print(f"Error fetching {timeframe} data for {ticker}: {e}")
+        print(f"Error fetching data for {ticker}: {e}")
+        print(f"Type of error: {type(e)}")
         return None
 
 def get_daily_data(ticker, limit=2):
+    """
+    Get daily bar data adjusted for paper trading access
+    """
     try:
-        bars = api.get_bars(ticker, '1Day', limit=limit, adjustment='raw', feed='iex')
-        bars = list(bars)
+        # Get current time in Eastern timezone
+        eastern = pytz.timezone('US/Eastern')
+        end = datetime.datetime.now(eastern)
+        start = end - datetime.timedelta(days=5)  # Get last 5 days to ensure we have enough data
+
+        # Request daily bars
+        bars = api.get_bars(
+            ticker,
+            "1Day",
+            start=start.isoformat(),
+            end=end.isoformat(),
+            adjustment='raw',
+            feed='iex'  # Specify IEX feed for paper trading
+        )
+
+        # Convert to DataFrame
+        df = pd.DataFrame([{
+            'time': bar.t,
+            'open': bar.o,
+            'high': bar.h,
+            'low': bar.l,
+            'close': bar.c,
+            'volume': bar.v
+        } for bar in bars])
+
+        if df.empty:
+            print(f"No daily data returned for {ticker}")
+            return None
+
+        # Set index to time
+        df.set_index('time', inplace=True)
+        df.sort_index(inplace=True)
+        
+        return df
+
     except Exception as e:
         print(f"Error fetching daily data for {ticker}: {e}")
         return None
-    if not bars:
-        print(f"No daily bars returned for {ticker}")
-        return None
-    data = {
-        'time':   [bar.t for bar in bars],
-        'open':   [bar.o for bar in bars],
-        'high':   [bar.h for bar in bars],
-        'low':    [bar.l for bar in bars],
-        'close':  [bar.c for bar in bars],
-        'volume': [bar.v for bar in bars]
-    }
-    df = pd.DataFrame(data)
-    df.set_index('time', inplace=True)
-    df.sort_index(inplace=True)
-    return df
 
 # ================================
 # Wilder Smoothing Function
@@ -576,8 +620,13 @@ def run_trading_with_rl():
                     continue
                     
                 # Get market features for position sizing
-                market_features = trading_env.calculate_market_features(intraday_df)
-                volatility_factor = max(0.5, min(1.0, 2.0 / (market_features.get('volatility', 1.0))))
+                market_features = trading_env.market_features
+                if not market_features:  # If market_features is empty, calculate them
+                    market_features = trading_env.calculate_market_features(intraday_df)
+                    
+                # Get volatility with safe default
+                volatility = market_features.get('volatility', 20.0)
+                volatility_factor = max(0.5, min(1.0, 2.0 / max(1.0, volatility)))
                 
                 # Adjust position size based on volatility
                 max_allocation = account_cash * 0.5 * volatility_factor
@@ -601,10 +650,10 @@ def run_trading_with_rl():
                     print(f"{ticker}: No position to sell.")
                     continue
                     
-                # Check if it's a stop loss or profit taking
-                if trading_env.position_entry_price:
-                    pl_pct = ((current_price - trading_env.position_entry_price) / 
-                             trading_env.position_entry_price) * 100
+                # Check if we have position entry price
+                entry_price = trading_env.get_position_entry_price()
+                if entry_price:
+                    pl_pct = ((current_price - entry_price) / entry_price) * 100
                     if pl_pct < -2.0:  # Stop loss
                         print(f"{ticker}: Stop loss triggered at {pl_pct:.2f}%")
                     elif pl_pct > 0:  # Profit taking
@@ -614,6 +663,8 @@ def run_trading_with_rl():
                 
         except Exception as e:
             print(f"Error processing {ticker}: {e}")
+            import traceback
+            print(traceback.format_exc())
         time.sleep(10)
         
     # Save Q-table and analyze performance
@@ -926,7 +977,7 @@ class PerformanceMonitor(QtCore.QObject):
             
         profits = [trade['pl_pct'] for trade in trades]
         win_rate = len([p for p in profits if p > 0]) / len(profits)
-        avg_profit = np.mean(profits)
+        avg_profit = np.mean(profits) / 100
         sharpe = np.mean(profits) / np.std(profits) if len(profits) > 1 else 0
         
         # Print performance metrics
