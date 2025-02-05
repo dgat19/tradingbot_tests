@@ -2,6 +2,7 @@ import asyncio
 import logging
 import pytz
 import re
+import os
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -739,8 +740,8 @@ class UnifiedOptionsTrader:
 if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO)
-    API_KEY = "PKJCI6OURNAXWQHA16OS"
-    API_SECRET = "EXqiYQD6uK9Yw736FsCUbE3ne96A5aFAc8mt2GDO"
+    API_KEY = os.getenv('APCA_PAPER_API_KEY')
+    API_SECRET = os.getenv('APCA_PAPER_SECRET_KEY')
     if not API_KEY or not API_SECRET:
         sys.exit("Alpaca API credentials not provided.")
     trader = UnifiedOptionsTrader(

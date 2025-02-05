@@ -33,8 +33,8 @@ except:
 # ================================
 # Alpaca API Initialization
 # ================================
-ALPACA_API_KEY = 'PK2UB2P604D2CDEJDPE5'
-ALPACA_SECRET_KEY = 'VYW9CmTKIepPEscKX43OR1OsQShWcAJb4taYAoC6'
+ALPACA_API_KEY = os.getenv('SCALPING_API_KEY')
+ALPACA_SECRET_KEY = os.getenv('SCALPING_SECRET_KEY')
 BASE_URL = 'https://paper-api.alpaca.markets'
 
 api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, base_url=BASE_URL, api_version='v2')
