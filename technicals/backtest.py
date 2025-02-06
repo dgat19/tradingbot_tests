@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Any, Tuple
 import matplotlib.pyplot as plt
 from datetime import datetime
 
-from technicals import TechnicalIndicators
+from indicators import TechnicalIndicators
 from strategy_optimizer import StrategyOptimizer
 
 class OptionsBacktester:

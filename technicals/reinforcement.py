@@ -3,21 +3,43 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import pandas as pd
+import logging
 from collections import deque
 import random
 from datetime import datetime
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(f'trading_rl_{datetime.now().strftime("%Y%m%d")}.log'),
+        logging.StreamHandler()
+    ]
+)
+
 class DQN(nn.Module):
-    """Deep Q-Network using PyTorch"""
+    """Deep Q-Network optimized for trading"""
     def __init__(self, input_size, hidden_size, output_size):
         super(DQN, self).__init__()
+        # Enhance network architecture with additional layer and dropout
         self.network = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, output_size)
+            nn.Dropout(0.2),
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_size // 2, output_size)
         )
+        
+        # Initialize weights using Xavier initialization
+        for layer in self.network:
+            if isinstance(layer, nn.Linear):
+                nn.init.xavier_uniform_(layer.weight)
+                nn.init.zeros_(layer.bias)
         
     def forward(self, x):
         return self.network(x)
@@ -64,19 +86,28 @@ class EnhancedTradingState:
         ])
 
 class EnhancedTradingEnvironment:
-    """Enhanced trading environment with direct control"""
-    def __init__(self, initial_balance=100000.0):
+    def __init__(self, initial_balance=100000.0, logger=None):
         self.initial_balance = initial_balance
+        self.logger = logger or logging.getLogger(__name__)
         self.reset()
         
+        # Add performance tracking
+        self.total_trades = 0
+        self.successful_trades = 0
+        self.total_profit = 0
+        self.max_drawdown = 0
+        
     def reset(self):
-        """Reset the environment"""
+        """Reset the environment with performance metrics and logging flag"""
         self.balance = self.initial_balance
         self.position = None
         self.trade_history = []
         self.market_features = {}
         self.current_state = None
-        self.position_entry_price = None  # Add explicit position entry price tracking
+        self.position_entry_price = None
+        self.peak_balance = self.initial_balance
+        # Reset the flag for data warning each cycle
+        self._data_warning_logged = False
         return self.current_state
 
     def get_position_entry_price(self):
@@ -86,14 +117,14 @@ class EnhancedTradingEnvironment:
         return None
         
     def calculate_market_features(self, df, lookback_window=20):
-        """Calculate market features from DataFrame"""
-        # Validate input
         if not isinstance(df, pd.DataFrame) or df.empty:
-            print("Invalid DataFrame provided to calculate_market_features")
+            self.logger.warning("Invalid DataFrame provided to calculate_market_features")
             return {}
-            
+                
         if len(df) < lookback_window:
-            print(f"Insufficient data for lookback window of {lookback_window}")
+            if not getattr(self, '_data_warning_logged', False):
+                self.logger.log_info(f"Insufficient data for lookback window of {lookback_window}")
+                self._data_warning_logged = True
             return {}
                 
         try:
@@ -153,13 +184,12 @@ class EnhancedTradingEnvironment:
             ]
             
             features['risk_score'] = float(min(1.0, sum(risk_components) / len(risk_components)))
-            
             return features
             
         except Exception as e:
-            print(f"Error calculating market features: {e}")
+            self.logger.error(f"Error calculating market features: {e}")
             import traceback
-            print(traceback.format_exc())
+            self.logger.error(traceback.format_exc())
             return {}
         
     def update_state(self, df):
@@ -301,7 +331,7 @@ class EnhancedTradingEnvironment:
         return reward
         
     def _record_trade(self, exit_price, pl_pct, current_bar):
-        """Record trade details with enhanced analytics"""
+        """Enhanced trade recording with performance metrics"""
         if self.position is None:
             return
             
@@ -316,13 +346,23 @@ class EnhancedTradingEnvironment:
             'exit_features': self.market_features.copy(),
             'timestamp': datetime.now()
         }
+        # Update performance metrics
+        self.total_trades += 1
+        if pl_pct > 0:
+            self.successful_trades += 1
+        self.total_profit += pl_pct
+        
+        # Update maximum drawdown
+        self.balance = self.balance * (1 + pl_pct/100)
+        if self.balance > self.peak_balance:
+            self.peak_balance = self.balance
+        else:
+            current_drawdown = (self.peak_balance - self.balance) / self.peak_balance * 100
+            self.max_drawdown = max(self.max_drawdown, current_drawdown)
         
         self.trade_history.append(trade_record)
-        print("\nTrade recorded:")
-        print(f"Entry Price: {trade_record['entry_price']:.2f}")
-        print(f"Exit Price: {trade_record['exit_price']:.2f}")
-        print(f"P/L %: {trade_record['pl_pct']:.2f}%")
-        print(f"Holding Time: {trade_record['holding_time']} bars")
+        self.logger.log_info(f"Trade recorded: {trade_record}")
+
         
     def get_position_info(self):
         """Get current position information"""
@@ -440,9 +480,13 @@ class EnhancedTradingAgent:
         loss.backward()
         self.optimizer.step()
         
-    def update_target_model(self):
+    def update_target_network(self):
         """Update target network weights"""
         self.target_model.load_state_dict(self.model.state_dict())
+    
+    def update_target_model(self):
+        """Alias for update_target_network for backward compatibility"""
+        self.update_target_network()
         
     def save(self, filename):
         """Save model weights"""
@@ -493,95 +537,121 @@ class EnhancedTradingAgent:
             self.take_profits[tp_idx]
         )
 
-def integrate_rl_agent(intraday_df, ticker, agent, env):
-    """Enhanced RL integration function with fixed data handling"""
-    current_state = None
-    prev_state = None
-    prev_action = None
+def integrate_rl_agent(intraday_df, ticker, agent, env, signal_generator, trading_plotter):
+    logger = logging.getLogger(__name__)
     
-    if isinstance(intraday_df, pd.DataFrame) and not intraday_df.empty and len(intraday_df) > 1:
-        try:
-            # Initialize environment with first state
-            current_state = env.update_state(intraday_df)
-            prev_state = current_state
-            prev_action = agent.get_action(current_state)
+    # Initialize environment with the full data slice
+    current_state = env.update_state(intraday_df)
+    if current_state is None:
+        logger.info(f"Initial state is None for ticker {ticker}; skipping RL integration.")
+        return agent
+
+    prev_state = current_state
+    prev_action = agent.get_action(current_state)
+    
+    # Loop over the data slice to integrate experience
+    for i in range(1, len(intraday_df)):
+        df_slice = intraday_df.iloc[:i+1]
+        current_state = env.update_state(df_slice)
+        if current_state is None:
+            continue
         
-            for i in range(1, len(intraday_df)):
-                # Get current slice of data
-                df_slice = intraday_df.iloc[:i+1]
-                
-                # Update state with current data
-                current_state = env.update_state(df_slice)
-                
-                # Get action and execute
-                action = agent.get_action(current_state)
-                reward, done = env.step(action, df_slice)
-                
-                # Train agent
-                if prev_state is not None and prev_action is not None:
-                    agent.train(prev_state, prev_action, reward, current_state, done)
-                
-                prev_state = current_state
-                prev_action = action
-                
-        except Exception as e:
-            print(f"Error in RL integration: {e}")
-            import traceback
-            print(traceback.format_exc())
-    
+        # Get a base signal using the shared signal generator.
+        base_signal = signal_generator.check_signals(df_slice, ticker)
+        # Optionally, obtain signal strength if needed.
+        signal_strength = signal_generator.get_signal_strength(df_slice)
+        
+        # If a base signal is generated, record a virtual trade.
+        if base_signal:
+            virtual_trade = {
+                'ticker': ticker,
+                'side': base_signal,  # 'buy' or 'sell'
+                'time': df_slice.index[-1],
+                'price': df_slice['close'].iloc[-1],
+                'quantity': 0,  # Virtual trade; quantity is 0 (for visualization only)
+                'signal_strength': signal_strength,
+                'virtual': True
+            }
+            trading_plotter.add_trade(virtual_trade)
+            logger.info(f"{ticker}: Virtual RL signal recorded as '{base_signal}' at price {virtual_trade['price']:.2f}")
+        
+        # Get an action using the RL agent's policy (with epsilon-greedy exploration)
+        is_training = random.random() < agent.epsilon
+        action = agent.get_action(current_state, training=is_training)
+        
+        reward, done = env.step(action, df_slice)
+        
+        # Train the agent with experience replay
+        if prev_state is not None and prev_action is not None:
+            agent.train(prev_state, prev_action, reward, current_state, done)
+            
+            # Optionally update the target network periodically
+            if i % 100 == 0:
+                agent.update_target_model()
+        
+        prev_state = current_state
+        prev_action = action
+
+    logger.info(f"Completed training on {ticker} - Episodes: {len(intraday_df)}, Final Epsilon: {agent.epsilon:.3f}")
     return agent
 
 def check_signals_with_rl(df, ticker, agent, env):
-    """Enhanced signal checking with risk management"""
+    """Enhanced signal checking with dynamic thresholds"""
+    logger = logging.getLogger(__name__)
+    
     if df is None or len(df) < 2:
         return None
     
-    # Update environment state
-    current_state = env.update_state(df)
-    
-    # Get market features
-    market_features = env.calculate_market_features(df)
-    risk_score = market_features.get('risk_score', 0.5)
-    
-    # Get action from agent
-    action = agent.get_action(current_state)
-    
-    # Apply risk-based filters
-    if action.action_type == 1:  # Buy
-        # Check risk conditions
-        if (risk_score > 0.7 or  # Too risky
-            market_features.get('volatility', 0) > 40 or  # Too volatile
-            market_features.get('volume_ratio', 1) < 0.5):  # Too low volume
-            return None
-            
-        # Check momentum alignment
-        momentum_5 = market_features.get('momentum', {}).get('momentum_5', 0)
-        momentum_20 = market_features.get('momentum', {}).get('momentum_20', 0)
-        if momentum_5 < 0 and momentum_20 < 0:  # Poor momentum
-            return None
-            
-        return 'buy'
+    try:
+        current_state = env.update_state(df)
+        market_features = env.calculate_market_features(df)
+        risk_score = market_features.get('risk_score', 0.5)
         
-    elif action.action_type == 2:  # Sell
-        # Get position info for trailing stop
-        position_price = env.position.get('entry_price', 0) if env.position else 0
-        if position_price > 0:
-            current_price = df['close'].iloc[-1]
-            pl_pct = ((current_price - position_price) / position_price) * 100
-            
-            # Dynamic stop loss based on risk
-            stop_loss = -2.0 * (1 + risk_score)  # Higher risk = tighter stop
-            
-            # Dynamic take profit based on volatility
-            volatility = market_features.get('volatility', 20)
-            take_profit = min(5.0, volatility)  # Cap at 5%
-            
-            if pl_pct <= stop_loss or pl_pct >= take_profit:
-                return 'sell'
+        # Get action with exploration disabled
+        action = agent.get_action(current_state, training=False)
+        
+        # Dynamic risk thresholds based on market conditions
+        volatility = market_features.get('volatility', 20)
+        risk_threshold = 0.7 - (0.1 if volatility < 15 else 0)  # Lower threshold for low volatility
+        
+        if action.action_type == 1:  # Buy
+            # Enhanced risk checks
+            if (risk_score > risk_threshold or
+                volatility > 40 or
+                market_features.get('volume_ratio', 1) < 0.5):
+                logger.info(f"{ticker}: Buy signal rejected due to risk factors")
+                return None
                 
-        return 'sell'
-    
-    return None
+            momentum_short = market_features.get('momentum_5', 0)
+            momentum_long = market_features.get('momentum_20', 0)
+            
+            # Momentum confirmation
+            if momentum_short >= 0 or momentum_long >= 0:
+                logger.info(f"{ticker}: Buy signal generated with momentum confirmation")
+                return 'buy'
+            
+        elif action.action_type == 2:  # Sell
+            position_price = env.get_position_entry_price()
+            if position_price:
+                current_price = df['close'].iloc[-1]
+                pl_pct = ((current_price - position_price) / position_price) * 100
+                
+                # Dynamic exit thresholds
+                stop_loss = -2.0 * (1 + risk_score)
+                take_profit = min(5.0, volatility)
+                
+                if pl_pct <= stop_loss or pl_pct >= take_profit:
+                    logger.info(f"{ticker}: Sell signal generated due to price targets")
+                    return 'sell'
+            
+            logger.info(f"{ticker}: Sell signal generated")
+            return 'sell'
+        
+        return None
+        
+    except Exception as e:
+        logger.error(f"Error checking signals for {ticker}: {str(e)}")
+        return None
 
 def calculate_position_size(account_cash, current_price, risk_score, confidence):
     """Calculate position size with enhanced risk management"""
@@ -606,3 +676,14 @@ def calculate_position_size(account_cash, current_price, risk_score, confidence)
     qty = position_dollars / current_price
     
     return round(qty, 3)
+
+# Export necessary components
+__all__ = [
+    'DQN',
+    'TradingAction',
+    'EnhancedTradingState',
+    'EnhancedTradingEnvironment',
+    'EnhancedTradingAgent',
+    'integrate_rl_agent',
+    'check_signals_with_rl'
+]

@@ -12,7 +12,7 @@ from alpaca.data.requests import OptionChainRequest
 from alpaca.data.historical import OptionHistoricalDataClient
 import yfinance as yf
 
-from technicals import TechnicalIndicators
+from indicators import TechnicalIndicators
 from market_hours import MarketHours
 from strategy_optimizer import StrategyOptimizer
 

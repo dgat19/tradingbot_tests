@@ -7,7 +7,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
-from technicals import TechnicalIndicators
+from indicators import TechnicalIndicators
 from market_hours import MarketHours
 from strategy_optimizer import StrategyOptimizer
 from backtest import OptionsBacktester
